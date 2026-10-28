@@ -261,6 +261,18 @@ def encode(text, original):
 
 
 def atomic_write(path, data):
+    """Write through a temp file, so a crash never leaves a half-written config.
+
+    mkstemp creates the temp file 0600, and the rename would carry that mode
+    onto config.toml - a permission change to a file that is not ours. The old
+    mode is restored after the rename rather than before it: a read-only
+    destination would make the rename fail if the temp file inherited the
+    read-only bit first.
+    """
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        mode = None
     fd, name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as handle:
@@ -268,6 +280,11 @@ def atomic_write(path, data):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(name, path)
+        if mode is not None:
+            try:
+                os.chmod(path, mode)
+            except OSError:
+                pass
     finally:
         if os.path.exists(name):
             os.unlink(name)

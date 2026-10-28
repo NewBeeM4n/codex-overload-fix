@@ -130,7 +130,16 @@ finished zip back to compare every entry against its blob before it reports succ
 Two things to know when using it:
 
 - Add `--expect <path>` for any file the release must carry that older tags did not have. That is
-  how a zip that predates a launcher gets caught instead of shipped.
+  how a zip that predates a launcher gets caught instead of shipped. Every release from the one
+  after v1.2.1 needs these six:
+
+  ```
+  python tools/make_release.py v1.3.0 \
+      --expect scripts/configure_codex.py --expect tests/test_configure_codex.py \
+      --expect scripts/install-linux.sh  --expect scripts/uninstall-linux.sh \
+      --expect scripts/install-mac.sh    --expect scripts/uninstall-mac.sh
+  ```
+
 - The archive is byte-reproducible: same ref in, same sha256 out. If the hash changes between two
   builds of one tag, something is tampering with the files, and that is the bug.
 

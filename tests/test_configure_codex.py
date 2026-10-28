@@ -217,6 +217,18 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         self.assertIn(config.ROOT, self.read())
         self.assertFalse(self.lock.exists())
 
+    @unittest.skipUnless(os.name != 'nt', 'POSIX permission bits')
+    def test_install_preserves_the_file_mode(self):
+        # The write goes through mkstemp, which creates 0600; renaming it into
+        # place would quietly narrow config.toml to owner-only. The mode has to
+        # survive the edit in both directions.
+        self.write('model = "keep"\n')
+        os.chmod(self.path, 0o640)
+        config.apply('install', self.path)
+        self.assertEqual(0o640, self.path.stat().st_mode & 0o777)
+        config.apply('remove', self.path)
+        self.assertEqual(0o640, self.path.stat().st_mode & 0o777)
+
     def test_cli_check_reports_without_writing(self):
         self.write('model = "keep"\n')
         before = self.path.read_bytes()
