@@ -345,6 +345,11 @@ def pid_alive(pid):
         return False
     except PermissionError:
         return True
+    except OverflowError:
+        # A pid outside the C int range cannot be running. Linux raises
+        # OverflowError here, not OSError, and a corrupt lock would otherwise
+        # crash the installer instead of being reclaimed.
+        return False
     except (OSError, ValueError, TypeError):
         return False
     return True
