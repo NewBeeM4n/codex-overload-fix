@@ -4,17 +4,26 @@
     Stop the Codex overload relay and remove its autostart entry.
 
 .DESCRIPTION
-    Removes the HKCU Run entry, terminates the watchdog and relay processes,
-    and optionally deletes the generated launchers and logs.
+    Restores config.toml first, then removes the HKCU Run entry, terminates the
+    watchdog and relay processes, and optionally deletes the generated launchers
+    and logs.
 
-    It does NOT touch your Codex config.toml - you have to remove the
-    model_provider line yourself so you can see exactly what changed.
+    The order matters. If config.toml cannot be restored - because the relay
+    entries were edited by hand since install - this stops with a non-zero exit
+    and leaves the relay running. Stopping it while Codex still points at the
+    port would turn a fixable problem into "everything is broken".
 
 .PARAMETER Purge
     Also delete %LOCALAPPDATA%\codex-overload-fix (launchers and logs).
+
+.PARAMETER NoConfig
+    Leave config.toml alone; only stop and remove the relay.
 #>
 [CmdletBinding()]
-param([switch]$Purge)
+param(
+    [switch]$Purge,
+    [switch]$NoConfig
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -28,6 +37,42 @@ Write-Host "-------------------------------" -ForegroundColor DarkGray
 $stateDir = Join-Path $env:LOCALAPPDATA 'codex-overload-fix'
 $runKey   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName  = 'CodexOverloadRelay'
+
+# ---------------------------------------------------------------- config first
+# Everything below this block is destructive to the running relay, so the one
+# step that can legitimately refuse runs first.
+if (-not $NoConfig) {
+    $configPy = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\configure_codex.py'
+    $python = $null
+    foreach ($candidate in @('py -3', 'python', 'python3')) {
+        $parts = $candidate.Split(' ')
+        $exe = $parts[0]
+        if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+        $prefix = @()
+        if ($parts.Count -gt 1) { $prefix = $parts[1..($parts.Count - 1)] }
+        try {
+            $out = & $exe @prefix -c "import sys;print(sys.executable)" 2>$null
+        } catch { continue }
+        $path = ($out | Select-Object -First 1).Trim()
+        if ($path -and (Test-Path $path) -and ($path -notmatch 'WindowsApps')) { $python = $path; break }
+    }
+
+    if ($python -and (Test-Path $configPy)) {
+        Write-Step 'Restoring config.toml...'
+        & $python $configPy remove
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ""
+            Write-Host "config.toml was not restored, so the relay is still running." -ForegroundColor Red
+            Write-Host "Codex is still pointed at it; stopping the relay now would break Codex." -ForegroundColor Red
+            Write-Host "Reconcile the entries above (or pass -NoConfig to leave config.toml alone)," -ForegroundColor Red
+            Write-Host "then run this uninstaller again." -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Step 'Python not found; leaving config.toml alone'
+        Write-Host "Remove the model_provider line and the [model_providers.openai-retry] table by hand." -ForegroundColor Yellow
+    }
+}
 
 # ---------------------------------------------------------------- autostart
 try {
@@ -71,16 +116,6 @@ if ($Purge) {
 }
 
 Write-Host ""
-Write-Host "Now remove these lines from $env:USERPROFILE\.codex\config.toml:" -ForegroundColor Yellow
-Write-Host "----------------------------------------" -ForegroundColor DarkGray
-Write-Host 'model_provider = "openai-retry"' -ForegroundColor White
-Write-Host '' -ForegroundColor White
-Write-Host '[model_providers.openai-retry]' -ForegroundColor White
-Write-Host 'name = "OpenAI (retry)"' -ForegroundColor White
-Write-Host 'base_url = "http://127.0.0.1:8787"' -ForegroundColor White
-Write-Host 'wire_api = "responses"' -ForegroundColor White
-Write-Host 'requires_openai_auth = true' -ForegroundColor White
-Write-Host 'stream_max_retries = 20' -ForegroundColor White
-Write-Host 'request_max_retries = 10' -ForegroundColor White
-Write-Host "----------------------------------------" -ForegroundColor DarkGray
+Write-Host "The relay is stopped and will not start at login again." -ForegroundColor Green
+Write-Host "Restart Codex to go back to a direct connection." -ForegroundColor Green
 Write-Host ""

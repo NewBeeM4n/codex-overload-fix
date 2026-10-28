@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - 'scripts/*.sh'
+      - 'scripts/configure_codex.py'
       - 'relay/relay.py'
+      - 'tests/**'
       - '.github/workflows/macos.yml'
   pull_request:
     paths:
       - 'scripts/*.sh'
+      - 'scripts/configure_codex.py'
       - 'relay/relay.py'
+      - 'tests/**'
   workflow_dispatch:
 
 permissions:
@@ -17,6 +21,9 @@ permissions:
 
 env:
   LABEL: com.codex-overload-fix.relay
+  # Same reason as the Linux workflow: the installer edits the config.toml
+  # Codex would read, and on a runner that means the real ~/.codex.
+  CODEX_HOME: ${{ github.workspace }}/.ci-codex
 
 jobs:
   launchd:
@@ -38,6 +45,35 @@ jobs:
           grep -q KeepAlive /tmp/dry.txt
           test ! -e "$HOME/Library/LaunchAgents/$LABEL.plist"
           echo "dry run wrote nothing"
+
+      - name: config.toml is edited safely, or not at all
+        run: |
+          mkdir -p "$CODEX_HOME"
+          # A realistic file: a comment, a root key, and a table of its own.
+          printf '# keep this comment\nmodel = "gpt-5.5"\n\n[features]\nweb_search = true\n' > "$CODEX_HOME/config.toml"
+          cp "$CODEX_HOME/config.toml" /tmp/before.toml
+
+          python3 scripts/configure_codex.py check --port 8787
+          python3 scripts/configure_codex.py install --port 8787
+          grep -q '^model_provider = "openai-retry"$' "$CODEX_HOME/config.toml"
+          grep -q 'model_providers.openai-retry' "$CODEX_HOME/config.toml"
+          grep -q 'base_url = "http://127.0.0.1:8787"' "$CODEX_HOME/config.toml"
+          # Byte-identical, not merely equivalent: the user's comments, key
+          # order and blank lines have to come back exactly as they were.
+          python3 scripts/configure_codex.py remove
+          diff -u /tmp/before.toml "$CODEX_HOME/config.toml"
+          echo "install and remove are byte identical"
+
+          # A relay table it cannot own is refused, and a refusal writes nothing.
+          printf 'model_provider = "openai-retry"\n\n[model_providers.openai-retry]\nbase_url = "http://127.0.0.1:8787"\n\n[model_providers.openai-retry.headers]\nX-A = "b"\n' > "$CODEX_HOME/config.toml"
+          cp "$CODEX_HOME/config.toml" /tmp/weird.toml
+          if python3 scripts/configure_codex.py install --port 8787; then
+            echo "install accepted a nested relay table"
+            exit 1
+          fi
+          diff -u /tmp/weird.toml "$CODEX_HOME/config.toml"
+          echo "a refused config is untouched"
+          rm -f "$CODEX_HOME/config.toml"
 
       - name: The plist is valid and its argv really starts the relay
         run: |

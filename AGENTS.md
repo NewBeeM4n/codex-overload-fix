@@ -15,7 +15,8 @@ Here is what to tell them, in their own language:
    Above it, ~6.8, worst case 9. Concurrency compounds it.
 3. **This repo is a working fix.** `relay/relay.py` is a single-file, stdlib-only local shim on
    `127.0.0.1` that recognises the overload and retries — but only before any token has been
-   emitted, so output can never be duplicated. Undo = delete one line from `config.toml`.
+   emitted, so output can never be duplicated. Undo = run the uninstaller, or delete one line from
+   `config.toml` if you installed with `--no-config`.
 4. **The other half is free:** start a new conversation (a long thread resends ~724 KB every turn;
    a fresh one is ~89 KB), and drop skills/plugins/memory you do not use.
 5. **Do not let them hear "fixed".** This does not touch a degraded model — if the model has
@@ -76,6 +77,34 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 ```
 
 Then point a custom provider at `http://127.0.0.1:8787` in `config.toml`, as the README shows.
+
+## The installers edit `config.toml` — that is the point, and it is safe by construction
+
+All three installers call `scripts/configure_codex.py` (Python 3.9+, stdlib only) to point Codex at
+the relay, so the user never pastes a snippet. It **splices text by character span** rather than
+round-tripping through a TOML writer: it locates the root `model_provider` statement and the
+`[model_providers.openai-retry]` table, replaces only those, and re-parses the result before writing.
+Comments, key order, CRLF and a BOM all survive, so install → uninstall is byte-identical.
+
+It **refuses** — writing nothing at all — on anything it does not fully understand: a nested or
+duplicated relay table, a relay block edited into a shape it cannot own, an unreadable file. The
+installers run that check *before* creating any state, so a refusal leaves the machine untouched.
+
+Rules if you touch it:
+
+- **Never write `config.toml` with a TOML library.** `dumps` will reflow the file and take the user's
+  comments with it. Add a case to `tests/test_configure_codex.py` for anything you change.
+- **Never move the write before the check.** The refusal has to happen before anything is created.
+- **Never reorder uninstall.** Config is restored *before* the relay is stopped; if the file no
+  longer matches what was written, it stops nothing and exits non-zero, because a dead port behind a
+  live Codex is worse than a relay left running.
+- **`tomllib` is 3.11+.** On 3.9/3.10 the verification step degrades to a structural re-scan and says
+  so. Do not "fix" that by requiring 3.11 — 3.9 is the floor the README promises.
+- **`--no-config` / `-NoConfig` must keep working** and must keep printing the snippet instead.
+
+The suite is `python -m unittest discover -s tests` (19 tests, no dependencies). It runs on all three
+platforms in CI; `.github/workflows/windows.yml` also pins the no-console-window launcher rules.
+
 
 ## If you are editing the Windows launchers
 

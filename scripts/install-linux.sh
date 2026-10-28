@@ -16,6 +16,7 @@ PROXY=""
 PYTHON_PATH=""
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codex-overload-fix"
 NO_AUTOSTART=0
+NO_CONFIG=0
 DRY_RUN=0
 LINGER=0
 SERVICE="codex-overload-fix"
@@ -37,6 +38,7 @@ usage: install-linux.sh [options]
   --state-dir DIR     Where the log lives
   --linger            Enable lingering so the relay survives logout
   --no-autostart      Write the unit but do not start or enable it
+  --no-config         Do not edit config.toml; print the snippet to paste instead
   --dry-run           Print the unit and the commands; change nothing
   -h, --help          This message
 EOF
@@ -50,6 +52,7 @@ while [ $# -gt 0 ]; do
         --state-dir)    [ $# -ge 2 ] || die "--state-dir needs a value";    STATE_DIR="$2"; shift 2 ;;
         --linger)       LINGER=1; shift ;;
         --no-autostart) NO_AUTOSTART=1; shift ;;
+        --no-config)    NO_CONFIG=1; shift ;;
         --dry-run)      DRY_RUN=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         *)              die "unknown option: $1 (try --help)" ;;
@@ -63,7 +66,12 @@ esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 RELAY="$ROOT/relay/relay.py"
+CONFIG_PY="$ROOT/scripts/configure_codex.py"
 [ -f "$RELAY" ] || die "relay/relay.py not found under $ROOT"
+if [ "$NO_CONFIG" -eq 0 ] && [ ! -f "$CONFIG_PY" ]; then
+    warn "configure_codex.py not found under $ROOT; running as if --no-config"
+    NO_CONFIG=1
+fi
 
 # ---------------------------------------------------------------- find python
 if [ -z "$PYTHON_PATH" ]; then
@@ -148,6 +156,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
     say "service:   $SERVICE"
     say "proxy:     ${PROXY:-(none)}"
     say ""
+    if [ "$NO_CONFIG" -eq 1 ]; then
+        say "config:    not edited (--no-config)"
+    else
+        say "config:    $PYTHON_PATH $CONFIG_PY install --port $PORT"
+    fi
+    say ""
     say "systemctl --user daemon-reload"
     say "systemctl --user enable $SERVICE"
     say "systemctl --user restart $SERVICE"
@@ -157,6 +171,21 @@ if [ "$DRY_RUN" -eq 1 ]; then
     say "----------------------------------------"
     emit_unit
     exit 0
+fi
+
+# ---------------------------------------------------------------- config check
+# Runs before the unit is written or systemd is touched. configure_codex.py
+# refuses anything it does not fully understand - a provider table nested under
+# a header, a hand-edited relay table, a file it cannot parse - and if it
+# refuses, nothing should have been installed. A relay running with Codex still
+# pointed at the old route is worse than no install at all: it looks like it
+# worked.
+if [ "$NO_CONFIG" -eq 0 ]; then
+    say "Checking config.toml..."
+    if ! "$PYTHON_PATH" "$CONFIG_PY" check --port "$PORT"; then
+        die "config.toml was not changed (see above). Fix that, or re-run with --no-config to install the relay only."
+    fi
+    ok "config.toml can be edited safely"
 fi
 
 mkdir -p "$STATE_DIR" "$UNIT_DIR"
@@ -227,9 +256,24 @@ else
     runtime_hint="Start:   $(quote_argv)"
 fi
 
-cat <<EOF
+# ---------------------------------------------------------------- config
+# CODEX_HOME is what Codex itself honours; configure_codex.py resolves it too.
+CONFIG_PATH="${CODEX_HOME:-$HOME/.codex}/config.toml"
+MANUAL="$NO_CONFIG"
+if [ "$MANUAL" -eq 0 ]; then
+    say "Pointing Codex at the relay..."
+    if "$PYTHON_PATH" "$CONFIG_PY" install --port "$PORT"; then
+        ok "config.toml points at 127.0.0.1:$PORT"
+    else
+        warn "could not edit config.toml automatically; add the block below by hand"
+        MANUAL=1
+    fi
+fi
 
-Add this to ~/.codex/config.toml, then restart Codex:
+if [ "$MANUAL" -eq 1 ]; then
+    cat <<EOF
+
+Add this to $CONFIG_PATH, then restart Codex:
 
 model_provider = "openai-retry"
 
@@ -242,6 +286,12 @@ stream_max_retries = 20
 request_max_retries = 10
 
 Keep a backup of config.toml before editing.
+EOF
+else
+    printf '\nThen fully restart Codex.\n'
+fi
+
+cat <<EOF
 
 Log:     $LOG_PATH
 $runtime_hint

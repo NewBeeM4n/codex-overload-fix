@@ -5,10 +5,12 @@
 
 .DESCRIPTION
     Finds Python, generates hidden launchers, registers a watchdog in HKCU\...\Run
-    (no admin rights required) and prints the config.toml snippet you need to paste.
+    (no admin rights required) and points Codex at the relay by editing only this
+    project's two entries in config.toml. The pre-install file is backed up and
+    scripts\uninstall.ps1 puts it back byte for byte.
 
 .PARAMETER Port
-    Local port for the relay. Default 8787.
+    Local port for the relay. Default 8787. The config entry follows it.
 
 .PARAMETER Proxy
     Upstream proxy, e.g. http://127.0.0.1:7897. Omit if your system proxy already
@@ -17,6 +19,9 @@
 .PARAMETER NoAutostart
     Generate the launchers but do not register the watchdog to start at login.
 
+.PARAMETER NoConfig
+    Do not edit config.toml; print the snippet to paste instead.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Proxy http://127.0.0.1:7897
 #>
@@ -24,7 +29,8 @@
 param(
     [int]$Port = 8787,
     [string]$Proxy = "",
-    [switch]$NoAutostart
+    [switch]$NoAutostart,
+    [switch]$NoConfig
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +46,7 @@ Write-Host "-----------------------------" -ForegroundColor DarkGray
 # ---------------------------------------------------------------- locations
 $root      = Split-Path -Parent $PSScriptRoot
 $relayPy   = Join-Path $root 'relay\relay.py'
+$configPy  = Join-Path $root 'scripts\configure_codex.py'
 $stateDir  = Join-Path $env:LOCALAPPDATA 'codex-overload-fix'
 $logPath   = Join-Path $stateDir 'relay.log'
 $startVbs  = Join-Path $stateDir 'start-relay.vbs'
@@ -50,7 +57,6 @@ $runName   = 'CodexOverloadRelay'
 if (-not (Test-Path $relayPy)) {
     throw "relay.py not found at $relayPy - run this from the repository's scripts\ folder."
 }
-New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 
 # ---------------------------------------------------------------- find python
 Write-Step 'Looking for Python...'
@@ -59,8 +65,13 @@ foreach ($candidate in @('py -3', 'python', 'python3')) {
     $parts = $candidate.Split(' ')
     $exe = $parts[0]
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+    # A one-word candidate has no arguments. Slicing $parts[1..0] would hand the
+    # executable its own name as first argument, and `python python -c ...`
+    # fails, which used to make this candidate silently unusable.
+    $prefix = @()
+    if ($parts.Count -gt 1) { $prefix = $parts[1..($parts.Count - 1)] }
     try {
-        $out = & $exe @($parts[1..($parts.Count - 1)] | Where-Object { $_ }) -c "import sys;print(sys.executable)" 2>$null
+        $out = & $exe @prefix -c "import sys;print(sys.executable)" 2>$null
     } catch { continue }
     if (-not $out) { continue }
     $path = ($out | Select-Object -First 1).Trim()
@@ -80,6 +91,23 @@ foreach ($candidate in @('py -3', 'python', 'python3')) {
 if (-not $python) {
     throw 'No usable Python 3.9+ found. Install from https://python.org and re-run.'
 }
+
+# ---------------------------------------------------------------- config check
+# Runs before a single file is written. configure_codex.py refuses anything it
+# does not fully understand - a provider table nested under a header, a
+# hand-edited relay table, a file it cannot parse - and if it refuses, nothing
+# should have been installed. A relay running with Codex still pointed at the
+# old route is worse than no install at all: it looks like it worked.
+if (-not $NoConfig) {
+    Write-Step 'Checking config.toml...'
+    & $python $configPy check --port $Port
+    if ($LASTEXITCODE -ne 0) {
+        throw "config.toml was not changed (see above). Fix that, or run this script with -NoConfig to install the relay only."
+    }
+    Write-Ok 'config.toml can be edited safely'
+}
+
+New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 
 # ---------------------------------------------------------------- build command
 $argList = @(
@@ -154,11 +182,27 @@ if ($listening) {
 }
 
 # ---------------------------------------------------------------- config
-$configPath = Join-Path $env:USERPROFILE '.codex\config.toml'
+# CODEX_HOME is what Codex itself honours; fall back to the default location.
+if ($env:CODEX_HOME) {
+    $configPath = Join-Path $env:CODEX_HOME 'config.toml'
+} else {
+    $configPath = Join-Path $env:USERPROFILE '.codex\config.toml'
+}
+$manual = [bool]$NoConfig
 Write-Host ""
-Write-Host "Add this to $configPath" -ForegroundColor Cyan
-Write-Host "----------------------------------------" -ForegroundColor DarkGray
-$snippet = @"
+if (-not $manual) {
+    Write-Step 'Pointing Codex at the relay...'
+    & $python $configPy install --port $Port
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn2 'could not edit config.toml automatically; add the block below by hand'
+        $manual = $true
+    }
+}
+
+if ($manual) {
+    Write-Host "Add this to $configPath" -ForegroundColor Cyan
+    Write-Host "----------------------------------------" -ForegroundColor DarkGray
+    $snippet = @"
 model_provider = "openai-retry"
 
 [model_providers.openai-retry]
@@ -169,10 +213,12 @@ requires_openai_auth = true
 stream_max_retries = 20
 request_max_retries = 10
 "@
-Write-Host $snippet -ForegroundColor White
-Write-Host "----------------------------------------" -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "Keep a backup of config.toml before editing." -ForegroundColor Yellow
+    Write-Host $snippet -ForegroundColor White
+    Write-Host "----------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "Keep a backup of config.toml before editing." -ForegroundColor Yellow
+}
+
 Write-Host "Then fully restart Codex." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Log:     $logPath" -ForegroundColor DarkGray

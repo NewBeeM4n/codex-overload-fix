@@ -153,8 +153,11 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 The installer will:
 
 1. Locate Python (3.9+; stdlib only, no dependencies).
-2. Register a hidden launcher and a watchdog in `HKCU\...\Run` — no admin rights, no console window.
-3. Print the `config.toml` snippet you need to paste.
+2. Check `config.toml` before it changes anything. If the file holds something it cannot safely edit — a `[model_providers.openai-retry]` table it did not write, a nested table, TOML it cannot parse — it says so and installs nothing.
+3. Register a hidden launcher and a watchdog in `HKCU\...\Run` — no admin rights, no console window.
+4. Point Codex at the relay by editing only this project's two entries in `config.toml`. The pre-install file is backed up, and `uninstall.ps1` puts it back byte for byte.
+
+Add `-NoConfig` to skip step 4 and print the snippet to paste instead.
 
 ### macOS
 
@@ -166,11 +169,14 @@ bash scripts/install-mac.sh
 
 It registers the relay as a per-user **LaunchAgent** (`~/Library/LaunchAgents/com.codex-overload-fix.relay.plist`). No admin rights. There is no watchdog script and no window to hide: `launchd` restarts the process itself via `KeepAlive`, so the whole `wscript`/`SW_HIDE` apparatus below does not exist on this platform.
 
-Options: `--port`, `--proxy`, `--python-path`, `--state-dir`, `--no-autostart`, `--dry-run` (prints the plist and changes nothing).
+It then points Codex at the relay, editing only this project's two entries in `config.toml` and backing up the original. `uninstall-mac.sh` restores it byte for byte.
+
+Options: `--port`, `--proxy`, `--python-path`, `--state-dir`, `--no-autostart`, `--no-config`, `--dry-run` (prints the plist and changes nothing).
 
 ```bash
 bash scripts/install-mac.sh --dry-run          # inspect first
 bash scripts/install-mac.sh --proxy http://127.0.0.1:7890
+bash scripts/install-mac.sh --no-config        # relay only; print the snippet to paste
 bash scripts/uninstall-mac.sh                  # undo, add --purge to delete the log
 ```
 
@@ -186,12 +192,15 @@ bash scripts/install-linux.sh
 
 It registers the relay as a **systemd `--user`** service (`~/.config/systemd/user/codex-overload-fix.service`). No root, no `sudo`, no console window — `systemd` restarts the process itself via `Restart=always`, so there is no watchdog script here either.
 
-Options: `--port`, `--proxy`, `--python-path`, `--state-dir`, `--no-autostart`, `--dry-run` (prints the unit and changes nothing), plus `--linger`.
+It then points Codex at the relay, editing only this project's two entries in `config.toml` and backing up the original. `uninstall-linux.sh` restores it byte for byte.
+
+Options: `--port`, `--proxy`, `--python-path`, `--state-dir`, `--no-autostart`, `--no-config`, `--dry-run` (prints the unit and changes nothing), plus `--linger`.
 
 ```bash
 bash scripts/install-linux.sh --dry-run        # inspect first
 bash scripts/install-linux.sh --proxy http://127.0.0.1:7890
 bash scripts/install-linux.sh --linger         # keep it running after logout (servers, SSH boxes)
+bash scripts/install-linux.sh --no-config      # relay only; print the snippet to paste
 bash scripts/uninstall-linux.sh                # undo, add --purge to delete the log
 ```
 
@@ -204,7 +213,9 @@ Two Linux-specific notes:
 
 ### All platforms, then
 
-Edit `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows):
+The installers do this for you. Each one edits `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml` if that variable is set) and touches only the two entries below, so comments, key order and every unrelated setting survive untouched. It refuses rather than guesses: if the file holds something it does not fully understand, it prints why and installs nothing.
+
+If you passed `--no-config` / `-NoConfig`, or the installer could not edit the file safely and printed the snippet instead, add this by hand:
 
 ```toml
 model_provider = "openai-retry"
@@ -230,7 +241,9 @@ Nothing is permanent, and the relay is stopped the same way on every platform:
 - **macOS:** `bash scripts/uninstall-mac.sh` (add `--purge` to delete the log too)
 - **Linux:** `bash scripts/uninstall-linux.sh` (add `--purge` to delete the log too)
 
-Then remove the `model_provider` line and the `[model_providers.openai-retry]` block from `config.toml` and restart Codex.
+The uninstallers restore `config.toml` from the backup taken at install, byte for byte, so you do not have to remove anything by hand. They restore it *before* stopping the relay, and refuse to stop anything if the file no longer matches what was written — a relay stopped with Codex still pointed at it is worse than one left running. Restart Codex afterwards.
+
+If you installed with `--no-config` / `-NoConfig`, remove the `model_provider` line and the `[model_providers.openai-retry]` block yourself.
 
 ### Windows: why the installer uses wscript, not `-WindowStyle Hidden`
 
@@ -277,6 +290,7 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 - **It does not bypass a limit.** It retries a request that the server declined to serve. It uses the same public custom-provider mechanism that people use to point Codex at Ollama or LM Studio.
 - **It is local, and it is not a relay service.** This is a Python process on `127.0.0.1` that forwards to the official endpoint. There is no third-party server, no shared account pool, no middleman that sees your token — the opposite of the mirror/shared-account services people usually mean by "reverse proxy". Delete one line from `config.toml` and you are back to direct connections.
 - **It retries only when nothing was generated**, so you cannot get duplicated or spliced output.
+- **The one file it edits is `config.toml`, and only two entries in it.** `scripts/configure_codex.py` finds the existing `model_provider` statement and the `[model_providers.openai-retry]` table by span and splices text, so comments, ordering, line endings and a BOM all survive; it writes only after the result parses. It refuses anything it does not fully understand — a nested table, a hand-edited relay block, a file it cannot read — and writes nothing in that case. Install→uninstall is byte-identical, including the case where there was no `config.toml` before install. That is checked by `tests/test_configure_codex.py` and by all three platform workflows.
 - **On account risk:** I can't promise zero, since any client that changes request timing is outside the default behaviour. What it does *not* do is share credentials, impersonate the client, bypass quota, or reverse-engineer the protocol. It re-sends a request the server already declined — the same action as clicking retry, just before the error reaches you. If you want to be conservative, lower `--max-attempts` to 10 and widen the backoff.
 
 What it *cannot* fix: a genuinely exhausted quota, an expired login, or a broken network — those are different errors and are passed through unchanged. Nor is it a fix for **a degraded model**: if the model itself has started answering worse than it used to, nothing here changes that. It stops the capacity error from interrupting you; it cannot make the model smarter. See [Limitations](#limitations).
@@ -345,12 +359,14 @@ Shedding load is the right mechanism — a server-side queue at this scale turns
 ## Contributors
 
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
-<a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>
+<a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
+<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>
 
 | contributor | contribution |
 |---|---|
 | [@NewBeeM4n](https://github.com/NewBeeM4n) | The relay and every measurement behind it, the Windows and macOS launchers, the release tooling, the documentation. |
 | [@JSVan32](https://github.com/JSVan32) | The Linux launcher — `scripts/install-linux.sh`, `scripts/uninstall-linux.sh` and `.github/workflows/linux.yml` — in [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1). |
+| [@BronyaDev](https://github.com/BronyaDev) | The safe editor for `config.toml` that all three installers now use: the span-splicing approach, the refusal rules and the install/remove round-trip tests, from [his fork](https://github.com/BronyaDev/codex-overload-fix) (`c38c18d4`, `c440a855`). Ported into `scripts/configure_codex.py` and `tests/test_configure_codex.py` with his design intact; what changed is listed in that file's header. |
 
 Contributions of any size are welcome: a bug report, a measurement from your own machine, a correction to something above, or a fix. Open an issue or a pull request.
 

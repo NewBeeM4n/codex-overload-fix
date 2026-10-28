@@ -1,0 +1,128 @@
+name: Windows installers
+
+on:
+  push:
+    paths:
+      - 'scripts/install.ps1'
+      - 'scripts/uninstall.ps1'
+      - 'scripts/configure_codex.py'
+      - 'relay/relay.py'
+      - 'tests/**'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'scripts/install.ps1'
+      - 'scripts/uninstall.ps1'
+      - 'scripts/configure_codex.py'
+      - 'relay/relay.py'
+      - 'tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Everything below runs against a throwaway config, never a real ~/.codex.
+  # The tests set CODEX_HOME themselves; this is the belt to their braces.
+  CODEX_HOME: ${{ github.workspace }}\.ci-codex
+
+jobs:
+  tests:
+    name: unittest (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor the README promises, and it is the leg that matters:
+        # tomllib arrives in 3.11, so on 3.9 configure_codex.py validates by
+        # re-scanning the result instead of parsing it. That fallback is only
+        # ever exercised on an interpreter this old.
+        python: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Syntax of every script
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/configure_codex.py tests/test_configure_codex.py
+          foreach ($f in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          }
+          Write-Host "scripts parse"
+
+      - name: Run the suite
+        run: python -m unittest discover -s tests -v
+
+      - name: A refusal leaves config.toml untouched
+        shell: pwsh
+        run: |
+          # The suite already covers this through install.ps1; this repeats it
+          # against configure_codex.py alone, so a failure points straight at
+          # the editor rather than at PowerShell plumbing.
+          New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
+          $cfg = Join-Path $env:CODEX_HOME 'config.toml'
+          @'
+          model_provider = "openai-retry"
+
+          [model_providers.openai-retry]
+          base_url = "http://127.0.0.1:8787"
+
+          [model_providers.openai-retry.headers]
+          X-A = "b"
+          '@ | Set-Content -Encoding utf8 -LiteralPath $cfg
+          $before = Get-Content -Raw -LiteralPath $cfg
+          python scripts/configure_codex.py install --port 8787
+          if ($LASTEXITCODE -eq 0) { Write-Error "install accepted a nested relay table"; exit 1 }
+          if ((Get-Content -Raw -LiteralPath $cfg) -ne $before) {
+            Write-Error "a refused config was modified"; exit 1
+          }
+          Write-Host "a refused config is untouched"
+          # pwsh in Actions exits with the last native exit code, and that one
+          # is the refusal we just asserted on.
+          exit 0
+
+      - name: Install and remove round-trips byte for byte
+        shell: pwsh
+        run: |
+          $cfg = Join-Path $env:CODEX_HOME 'config.toml'
+          # CRLF and a BOM: the two things a naive writer destroys.
+          $text = "model = `"gpt-5.5`"`r`n`r`n[features]`r`nweb_search = true`r`n"
+          [IO.File]::WriteAllText($cfg, $text, [Text.UTF8Encoding]::new($true))
+          $before = [IO.File]::ReadAllBytes($cfg)
+          python scripts/configure_codex.py install --port 8787
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python scripts/configure_codex.py remove
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $after = [IO.File]::ReadAllBytes($cfg)
+          if ([Convert]::ToBase64String($before) -ne [Convert]::ToBase64String($after)) {
+            Write-Error "install + remove did not restore the original bytes"; exit 1
+          }
+          Write-Host "install and remove are byte identical"
+
+      - name: The no-console-window rule still holds
+        shell: pwsh
+        run: |
+          # docs/windows-no-console-window.md measured this: only SW_HIDE at
+          # process creation keeps the window off screen. These are the
+          # regressions that would silently undo it, and they are checked here
+          # rather than measured, because a runner has no interactive desktop
+          # for tools/check_console_flash.py to watch.
+          $ps = Get-Content -Raw scripts/install.ps1
+          if ($ps -notmatch 'sh\.Run "\$vbsCmd", 0, False') {
+            Write-Error "the start launcher no longer uses SW_HIDE (sh.Run ..., 0, False)"; exit 1
+          }
+          if ($ps -match 'New-ScheduledTask|schtasks') {
+            Write-Error "the launchers were replaced by a scheduled task"; exit 1
+          }
+          if ($ps -notmatch 'wscript\.exe') {
+            Write-Error "autostart no longer goes through wscript.exe"; exit 1
+          }
+          Write-Host "launchers still use wscript + SW_HIDE"

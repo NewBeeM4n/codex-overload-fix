@@ -16,6 +16,7 @@ PROXY=""
 PYTHON_PATH=""
 STATE_DIR="$HOME/Library/Application Support/codex-overload-fix"
 NO_AUTOSTART=0
+NO_CONFIG=0
 DRY_RUN=0
 LABEL="com.codex-overload-fix.relay"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -34,6 +35,7 @@ usage: install-mac.sh [options]
   --python-path PATH  Use this interpreter instead of the first python3 on PATH
   --state-dir DIR     Where the log lives
   --no-autostart      Write the plist but do not load it now
+  --no-config         Do not edit config.toml; print the snippet to paste instead
   --dry-run           Print the plist and the commands; change nothing
   -h, --help          This message
 EOF
@@ -46,6 +48,7 @@ while [ $# -gt 0 ]; do
         --python-path)  [ $# -ge 2 ] || die "--python-path needs a value";  PYTHON_PATH="$2"; shift 2 ;;
         --state-dir)    [ $# -ge 2 ] || die "--state-dir needs a value";    STATE_DIR="$2"; shift 2 ;;
         --no-autostart) NO_AUTOSTART=1; shift ;;
+        --no-config)    NO_CONFIG=1; shift ;;
         --dry-run)      DRY_RUN=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         *)              die "unknown option: $1 (try --help)" ;;
@@ -59,7 +62,12 @@ esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 RELAY="$ROOT/relay/relay.py"
+CONFIG_PY="$ROOT/scripts/configure_codex.py"
 [ -f "$RELAY" ] || die "relay/relay.py not found under $ROOT"
+if [ "$NO_CONFIG" -eq 0 ] && [ ! -f "$CONFIG_PY" ]; then
+    warn "configure_codex.py not found under $ROOT; running as if --no-config"
+    NO_CONFIG=1
+fi
 
 # ---------------------------------------------------------------- find python
 if [ -z "$PYTHON_PATH" ]; then
@@ -94,6 +102,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
     say "label:     $LABEL"
     say "proxy:     ${PROXY:-(none)}"
     say ""
+    if [ "$NO_CONFIG" -eq 1 ]; then
+        say "config:    not edited (--no-config)"
+    else
+        say "config:    $PYTHON_PATH $CONFIG_PY install --port $PORT"
+    fi
+    say ""
     say "launchctl bootout gui/$UID/$LABEL  (ignore failure)"
     say "launchctl bootstrap gui/$UID $PLIST_PATH"
     say ""
@@ -123,6 +137,21 @@ plist = {
 print(plistlib.dumps(plist).decode())
 PY
     exit 0
+fi
+
+# ---------------------------------------------------------------- config check
+# Runs before the plist is written or launchctl is touched. configure_codex.py
+# refuses anything it does not fully understand - a provider table nested under
+# a header, a hand-edited relay table, a file it cannot parse - and if it
+# refuses, nothing should have been installed. A relay running with Codex still
+# pointed at the old route is worse than no install at all: it looks like it
+# worked.
+if [ "$NO_CONFIG" -eq 0 ]; then
+    say "Checking config.toml..."
+    if ! "$PYTHON_PATH" "$CONFIG_PY" check --port "$PORT"; then
+        die "config.toml was not changed (see above). Fix that, or re-run with --no-config to install the relay only."
+    fi
+    ok "config.toml can be edited safely"
 fi
 
 mkdir -p "$STATE_DIR" "$(dirname "$PLIST_PATH")"
@@ -184,10 +213,24 @@ else
     say "plist written; not loaded (--no-autostart)"
 fi
 
-# ---------------------------------------------------------------- next steps
-cat <<EOF
+# ---------------------------------------------------------------- config
+# CODEX_HOME is what Codex itself honours; configure_codex.py resolves it too.
+CONFIG_PATH="${CODEX_HOME:-$HOME/.codex}/config.toml"
+MANUAL="$NO_CONFIG"
+if [ "$MANUAL" -eq 0 ]; then
+    say "Pointing Codex at the relay..."
+    if "$PYTHON_PATH" "$CONFIG_PY" install --port "$PORT"; then
+        ok "config.toml points at 127.0.0.1:$PORT"
+    else
+        warn "could not edit config.toml automatically; add the block below by hand"
+        MANUAL=1
+    fi
+fi
 
-Add this to ~/.codex/config.toml, then restart Codex:
+if [ "$MANUAL" -eq 1 ]; then
+    cat <<EOF
+
+Add this to $CONFIG_PATH, then restart Codex:
 
 model_provider = "openai-retry"
 
@@ -200,6 +243,12 @@ stream_max_retries = 20
 request_max_retries = 10
 
 Keep a backup of config.toml before editing.
+EOF
+else
+    printf '\nThen fully restart Codex.\n'
+fi
+
+cat <<EOF
 
 Log:     $LOG_PATH
 Stop:    bash scripts/uninstall-mac.sh

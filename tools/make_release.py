@@ -52,6 +52,17 @@ REQUIRED = [
     "tools/analyze_log.py",
 ]
 
+# Files that arrived after the tags above, so they cannot live in REQUIRED
+# without making those tags unbuildable. Every release from the one that
+# introduced them onward must list them on the command line:
+#
+#   --expect scripts/configure_codex.py --expect tests/test_configure_codex.py
+#   --expect scripts/install-linux.sh --expect scripts/uninstall-linux.sh
+#   --expect scripts/install-mac.sh   --expect scripts/uninstall-mac.sh
+#
+# install.ps1 and uninstall.ps1 are in REQUIRED because v1.0.0 already had
+# them; the four shell scripts and configure_codex.py are not.
+
 # A launcher that is 644 inside the zip still works when invoked as
 # `bash script.sh`, but not when run directly -- and on macOS the LaunchAgent
 # path goes through the shebang. build() carries the mode into the archive;

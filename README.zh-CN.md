@@ -153,8 +153,11 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 安装脚本会：
 
 1. 找到 Python（3.9+，纯标准库，无依赖）。
-2. 在 `HKCU\...\Run` 里注册隐藏启动器和看门狗——不需要管理员权限，不弹控制台窗口。
-3. 打印你需要粘贴的 `config.toml` 片段。
+2. **先检查 `config.toml`，再动任何东西。** 如果里面有什么它没法安全改写的内容——不是它写的 `[model_providers.openai-retry]` 表、嵌套的表、解析不了的 TOML——它会说明原因，然后什么都不装。
+3. 在 `HKCU\...\Run` 里注册隐藏启动器和看门狗——不需要管理员权限，不弹控制台窗口。
+4. 只改 `config.toml` 里属于本项目的两处，把 Codex 指到中继上。改之前的文件会备份，`uninstall.ps1` 会把它逐字节恢复。
+
+加 `-NoConfig` 可以跳过第 4 步，改为打印你需要粘贴的片段。
 
 ### macOS
 
@@ -166,11 +169,14 @@ bash scripts/install-mac.sh
 
 它把中继注册成**用户级 LaunchAgent**（`~/Library/LaunchAgents/com.codex-overload-fix.relay.plist`），不需要管理员权限。这里既没有看门狗脚本，也没有窗口要藏：`launchd` 靠 `KeepAlive` 自己重启进程，所以下面那一整套 `wscript` / `SW_HIDE` 的机制在 macOS 上根本不存在。
 
-可选参数：`--port`、`--proxy`、`--python-path`、`--state-dir`、`--no-autostart`、`--dry-run`（只打印 plist，什么都不改）。
+然后它会把 Codex 指到中继上，只改 `config.toml` 里属于本项目的两处，并备份原文件；`uninstall-mac.sh` 会逐字节恢复。
+
+可选参数：`--port`、`--proxy`、`--python-path`、`--state-dir`、`--no-autostart`、`--no-config`、`--dry-run`（只打印 plist，什么都不改）。
 
 ```bash
 bash scripts/install-mac.sh --dry-run          # 先看一眼
 bash scripts/install-mac.sh --proxy http://127.0.0.1:7890
+bash scripts/install-mac.sh --no-config        # 只装中继，改打印片段自己贴
 bash scripts/uninstall-mac.sh                  # 卸载，加 --purge 连日志一起删
 ```
 
@@ -186,12 +192,15 @@ bash scripts/install-linux.sh
 
 它把中继注册成 **systemd `--user`** 服务（`~/.config/systemd/user/codex-overload-fix.service`）。不需要 root、不需要 `sudo`、没有控制台窗口——`systemd` 靠 `Restart=always` 自己重启进程，所以这里同样没有看门狗脚本。
 
-可选参数：`--port`、`--proxy`、`--python-path`、`--state-dir`、`--no-autostart`、`--dry-run`（只打印 unit，什么都不改），另外多一个 `--linger`。
+然后它会把 Codex 指到中继上，只改 `config.toml` 里属于本项目的两处，并备份原文件；`uninstall-linux.sh` 会逐字节恢复。
+
+可选参数：`--port`、`--proxy`、`--python-path`、`--state-dir`、`--no-autostart`、`--no-config`、`--dry-run`（只打印 unit，什么都不改），另外多一个 `--linger`。
 
 ```bash
 bash scripts/install-linux.sh --dry-run        # 先看一眼
 bash scripts/install-linux.sh --proxy http://127.0.0.1:7890
 bash scripts/install-linux.sh --linger         # 退出登录也不停（服务器、SSH 常连的机器）
+bash scripts/install-linux.sh --no-config      # 只装中继，改打印片段自己贴
 bash scripts/uninstall-linux.sh                # 卸载，加 --purge 连日志一起删
 ```
 
@@ -204,7 +213,9 @@ bash scripts/uninstall-linux.sh                # 卸载，加 --purge 连日志�
 
 ### 三个平台都一样，然后
 
-编辑 `~/.codex/config.toml`（Windows 上是 `%USERPROFILE%\.codex\config.toml`）：
+这一步安装脚本已经替你做完了。它改的是 `~/.codex/config.toml`（Windows 上是 `%USERPROFILE%\.codex\config.toml`；设了 `$CODEX_HOME` 就是 `$CODEX_HOME/config.toml`），而且只碰下面这两处，所以注释、键的顺序和其他所有设置都原样保留。它不会猜：文件里有它完全不理解的内容时，它会说明原因，然后什么都不装。
+
+如果你之前加了 `--no-config` / `-NoConfig`，或者安装器判断无法安全改写、打印了片段，就手动加上这一段：
 
 ```toml
 model_provider = "openai-retry"
@@ -224,12 +235,15 @@ request_max_retries = 10
 
 ### 卸载
 
-没有什么是不可逆的，两个平台都只是把中继停掉：
+没有什么是不可逆的，三个平台都只是把中继停掉：
 
 - **Windows：** `powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1`
 - **macOS：** `bash scripts/uninstall-mac.sh`（加 `--purge` 连日志一起删）
+- **Linux：** `bash scripts/uninstall-linux.sh`（加 `--purge` 连日志一起删）
 
-然后从 `config.toml` 里删掉 `model_provider` 那行和 `[model_providers.openai-retry]` 整块，重启 Codex。
+卸载脚本会用安装时留下的备份把 `config.toml` 逐字节恢复，你不用再手动删任何东西。它**先恢复配置，再停中继**；如果文件已经和当初写入的内容对不上，它会拒绝停任何东西——中继停了而 Codex 还指着一个死端口，比让它继续跑更糟。之后重启 Codex。
+
+如果你是从 `--no-config` / `-NoConfig` 装的，那就自己删掉 `model_provider` 那行和 `[model_providers.openai-retry]` 整块。
 
 ### Windows：安装脚本为什么用 wscript，而不是 `-WindowStyle Hidden`
 
@@ -276,6 +290,7 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 - **不绕过任何限制。** 它只是重试一个服务端拒绝服务的请求。用的是官方支持的 custom provider 机制——很多人用它把 Codex 指向 Ollama 或 LM Studio。
 - **它是本地的，而且它不是「反代」。** 这是 `127.0.0.1` 上的一个 Python 进程，直接转发到官方端点。没有第三方服务器、没有共享账号池、没有中间人看得到你的 token —— 和人们通常说的镜像站 / 反代站正好相反。从 `config.toml` 删掉一行就回到直连。
 - **只在什么都没生成时重试**，所以不可能出现重复或拼接的输出。
+- **它唯一改的文件是 `config.toml`，而且只改里面的两处。** `scripts/configure_codex.py` 按字符位置定位已有的 `model_provider` 语句和 `[model_providers.openai-retry]` 表，然后拼接文本，所以注释、顺序、换行符和 BOM 都原样保留；只有改完的内容能通过解析，它才落盘。遇到它不完全理解的内容——嵌套表、被手改过的中继块、读不了的文件——它直接拒绝，并且一个字节都不写。安装→卸载前后逐字节相同，包括「安装前根本没有 `config.toml`」这种情况。这一点由 `tests/test_configure_codex.py` 和三个平台的工作流逐次验证。
 - **关于封号风险：** 我不能保证为零 —— 任何改变了请求时序的客户端都不属于默认行为。但它**没有**做共享凭证、伪造客户端、绕过额度、逆向协议这几件事。它重发的请求，服务端此前已经明确拒绝过，本质和你手动点重试是同一个动作，只是发生在错误弹到你面前之前。想更保守可以把 `--max-attempts` 调到 10，并把退避拉长。
 
 它**治不了**：额度真正用尽、登录过期、网络不通 —— 那些是不同的错误，会原样透传。它也**不是模型降智的解药**：如果模型本身答得不如以前了，这里没有任何东西能改变它。它只负责让满载报错不再打断你，不能让模型变聪明。详见[局限](#局限)。
@@ -344,12 +359,14 @@ python tools\check_console_flash.py
 ## 贡献者
 
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
-<a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>
+<a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
+<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>
 
 | 贡献者 | 贡献内容 |
 |---|---|
 | [@NewBeeM4n](https://github.com/NewBeeM4n) | 中继本体和它背后全部的实测数据、Windows 与 macOS 启动脚本、打包工具、文档。 |
 | [@JSVan32](https://github.com/JSVan32) | Linux 启动脚本 —— `scripts/install-linux.sh`、`scripts/uninstall-linux.sh` 和 `.github/workflows/linux.yml`，见 [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1)。 |
+| [@BronyaDev](https://github.com/BronyaDev) | 三平台安装脚本现在都在用的那份 `config.toml` 安全编辑器：按字符位置拼接的思路、拒绝规则，以及安装/卸载往返测试，来自[他的 fork](https://github.com/BronyaDev/codex-overload-fix)（`c38c18d4`、`c440a855`）。移植进 `scripts/configure_codex.py` 和 `tests/test_configure_codex.py`，设计原样保留；改动之处列在那个文件开头的说明里。 |
 
 任何形式的贡献都欢迎：一个 bug 报告、一次你在自己机器上的实测、对上文某处的纠正，或者一个修复。开 issue 或提 PR 都行。
 
