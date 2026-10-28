@@ -102,8 +102,10 @@ Rules if you touch it:
   so. Do not "fix" that by requiring 3.11 — 3.9 is the floor the README promises.
 - **`--no-config` / `-NoConfig` must keep working** and must keep printing the snippet instead.
 
-The suite is `python -m unittest discover -s tests` (19 tests, no dependencies). It runs on all three
-platforms in CI; `.github/workflows/windows.yml` also pins the no-console-window launcher rules.
+The suite is `python -m unittest discover -s tests` (20 tests, no dependencies). It runs on all three
+platforms in CI — the Windows job drives the real `install.ps1`/`uninstall.ps1`, the macOS and Linux
+jobs run it directly (one test checks permission bits, so it is POSIX-only and skips on Windows).
+`.github/workflows/windows.yml` also pins the no-console-window launcher rules.
 
 
 ## If you are editing the Windows launchers
