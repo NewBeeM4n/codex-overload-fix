@@ -41,6 +41,9 @@ jobs:
           bash -n scripts/install-linux.sh
           bash -n scripts/uninstall-linux.sh
 
+      - name: Run the suite
+        run: python3 -m unittest discover -s tests -v
+
       - name: Dry run changes nothing
         run: |
           bash scripts/install-linux.sh --dry-run > /tmp/dry.txt

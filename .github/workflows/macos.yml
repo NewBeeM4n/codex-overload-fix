@@ -39,6 +39,9 @@ jobs:
           bash -n scripts/install-mac.sh
           bash -n scripts/uninstall-mac.sh
 
+      - name: Run the suite
+        run: python3 -m unittest discover -s tests -v
+
       - name: Dry run changes nothing
         run: |
           bash scripts/install-mac.sh --dry-run > /tmp/dry.txt
