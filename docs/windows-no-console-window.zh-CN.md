@@ -63,7 +63,7 @@ sh.Run "python ""...\relay.py"" --port 8787", 0, True
 
 `WScript.Shell.Run` 的第二个参数是窗口样式，`0` 就是 `SW_HIDE`。wscript 把它放进 `STARTUPINFO`，于是控制台**创建时就是隐藏的，一帧都不会显示**。而 `wscript.exe` 自己是 GUI 子系统程序，没有控制台，它自己也不会闪。
 
-`scripts/install.ps1:133` 往 `HKCU\...\Run` 里注册的就是 `wscript.exe "<state>\watch-relay.vbs"`。整个诀窍就这一句。
+`scripts/install.ps1` 里这句 `wscript.exe "<state>\watch-relay.vbs"` 出现在两处：写进 `HKCU\...\Run` 注册表值，以及安装完立刻启动看门狗时交给 `Win32_Process.Create` 的命令行。两条路都经过 `wscript.exe`，都不会用窗口样式参数去启动 PowerShell。整个诀窍就这一句。
 
 ### 2. `CreateNoWindow` / `CREATE_NO_WINDOW`
 
@@ -98,6 +98,24 @@ $taskArgs = '-WindowStyle Hidden -NoProfile -File watch.ps1'
 > 在 Windows 上，**凡是**用 `powershell.exe -WindowStyle Hidden` 启动的后台脚本 —— 不管是通过计划任务、Run 注册表项还是服务包装器 —— **都会闪一下**。走 `wscript.exe` + `SW_HIDE`，或者用 `CREATE_NO_WINDOW`。**没有任何命令行参数能绕开这件事。**
 
 本项目里每个长期驻留的辅助进程都适用。以后加新的后台组件，按同样方式启动。
+
+---
+
+## 第二个坑：调用者的 Job Object
+
+窗口藏住了，不代表后台进程就能活下来。如果执行安装器的那个进程持有带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 **Job Object**，那么安装器用 `Start-Process` 起来的每个进程都会加入这个 job，调用者一关闭 job，整棵进程树全灭。打包（MSIX）宿主和部分编辑器就是这么干的。
+
+于是 `Start-Process` 看起来成功了，实际留下一个死端口。解法不是计划任务，而是**离开调用者的进程树**：
+
+```powershell
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = 'wscript.exe "...\watch-relay.vbs"'
+}
+```
+
+`Win32_Process.Create` 由服务进程 `WmiPrvSE.exe` 实际执行，在你的进程树之外，所以它创建的看门狗不是 job 成员，能活过调用者退出。它**仍然启动的是 `wscript.exe`**，上面那条不闪窗的规则完全不受影响。在打包宿主上还有第二个好处：这样创建的进程不带包标识，因此读到的是真实的 `%LOCALAPPDATA%`，而不是被虚拟化到 `LocalCache` 的那份。
+
+测试套件里有针对这一点的回归测试（`test_the_relay_outlives_a_caller_that_closes_its_job`）：把真实的 `install.ps1` 放进一个 kill-on-close 的 job 里跑，关掉 job，如果中继不再监听就算失败。
 
 ---
 

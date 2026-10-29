@@ -63,7 +63,7 @@ sh.Run "python ""...\relay.py"" --port 8787", 0, True
 
 The second argument to `WScript.Shell.Run` is the window style, and `0` is `SW_HIDE`. wscript passes it in the `STARTUPINFO` block, so the console is created hidden and **never becomes visible, not for a single frame**. `wscript.exe` is itself a GUI-subsystem program, so it has no console of its own and shows nothing either.
 
-`scripts/install.ps1:133` registers `wscript.exe "<state>\watch-relay.vbs"` in `HKCU\...\Run`. That is the entire trick.
+`scripts/install.ps1` writes that `wscript.exe "<state>\watch-relay.vbs"` command line in two places: as the `HKCU\...\Run` value, and as the argument to `Win32_Process.Create` when it starts the watchdog right after installing. Both go through `wscript.exe`; neither ever starts PowerShell with a window style. That is the entire trick.
 
 ### 2. `CreateNoWindow` / `CREATE_NO_WINDOW`
 
@@ -98,6 +98,24 @@ The action is `powershell.exe`, so the OS allocates a console before PowerShell 
 > On Windows, **any** background script started as `powershell.exe -WindowStyle Hidden` — by Task Scheduler, by a Run key, by a service wrapper — will flash. Route it through `wscript.exe` with `SW_HIDE`, or use `CREATE_NO_WINDOW`. There is no command-line flag that avoids this.
 
 This applies to every long-lived helper in this project. If you add a new background component, launch it the same way.
+
+---
+
+## The second trap: your caller's Job Object
+
+Hiding the window is not enough to keep a background helper alive. If the process that runs the installer holds a **Job Object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, every process the installer starts with `Start-Process` joins that job, and the whole tree dies the moment the caller closes it. Packaged (MSIX) hosts and some editors do exactly this.
+
+`Start-Process` therefore looks like it worked and leaves a dead port behind. The fix is not Task Scheduler — it is to leave the caller's process tree:
+
+```powershell
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = 'wscript.exe "...\watch-relay.vbs"'
+}
+```
+
+`Win32_Process.Create` is carried out by `WmiPrvSE.exe`, a service outside your process tree, so the watchdog it creates is not a job member and survives the caller. It **still starts `wscript.exe`**, so the no-console-window rule above is untouched. A second benefit on packaged hosts: a process created this way carries no package identity, so it resolves the real `%LOCALAPPDATA%` rather than a virtualised `LocalCache` view of it.
+
+The suite has a regression test for this (`test_the_relay_outlives_a_caller_that_closes_its_job`): it runs the real `install.ps1` inside a kill-on-close job, closes the job, and fails if the relay stops listening.
 
 ---
 

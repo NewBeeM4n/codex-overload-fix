@@ -102,7 +102,7 @@ Rules if you touch it:
   so. Do not "fix" that by requiring 3.11 — 3.9 is the floor the README promises.
 - **`--no-config` / `-NoConfig` must keep working** and must keep printing the snippet instead.
 
-The suite is `python -m unittest discover -s tests` (20 tests, no dependencies). It runs on all three
+The suite is `python -m unittest discover -s tests` (21 tests, no dependencies). It runs on all three
 platforms in CI — the Windows job drives the real `install.ps1`/`uninstall.ps1`, the macOS and Linux
 jobs run it directly (one test checks permission bits, so it is POSIX-only and skips on Windows).
 `.github/workflows/windows.yml` also pins the no-console-window launcher rules.
@@ -119,6 +119,20 @@ enough to kick a fullscreen game out of exclusive mode.
 
 Verify any change with `python tools\check_console_flash.py` before claiming a fix. See
 `docs/windows-no-console-window.md`.
+
+**Start the watchdog through WMI, not `Start-Process`.** A `Start-Process` child is a member of the
+caller's Job Object, and any host that holds a kill-on-close job takes the watchdog — and the relay
+under it — down the moment it exits. Codex's packaged host does exactly that, so the install would
+report success and leave a dead port. `Invoke-CimMethod -ClassName Win32_Process -MethodName Create`
+is serviced by `WmiPrvSE.exe`, so the process it creates is outside the caller's tree; and because a
+WMI-created process carries no package identity, it also resolves the real `%LOCALAPPDATA%` instead
+of a virtualised view of it. The plain `Start-Process` line stays as a fallback for machines where
+WMI is unavailable — but a fallback install can still die with its caller, which is why the script
+says so out loud.
+
+**Do not point `config.toml` at a port that is not listening.** The installer waits up to 30 s for
+the relay, and if it never comes up it removes the autostart entry again and exits non-zero without
+touching the config. A config that looks installed but cannot answer is worse than no install.
 
 ## If you are cutting a release
 

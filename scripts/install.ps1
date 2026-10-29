@@ -157,29 +157,74 @@ Set-Content -Path $watchVbs -Value $watchContent -Encoding ASCII
 Write-Ok "watchdog  $watchVbs"
 
 # ---------------------------------------------------------------- autostart
+$registered = $false
 if (-not $NoAutostart) {
     $entry = 'wscript.exe "' + $watchVbs + '"'
     New-Item -Path $runKey -Force | Out-Null
     Set-ItemProperty -Path $runKey -Name $runName -Value $entry
+    $registered = $true
     Write-Ok "registered $runName in HKCU Run"
 }
 
 # ---------------------------------------------------------------- start now
 Write-Step 'Starting the relay...'
-Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $watchVbs + '"') -WindowStyle Hidden
-Start-Sleep -Seconds 4
 
-$listening = $false
+# Launch the watchdog through WMI rather than Start-Process. A Start-Process
+# child is a member of the caller's Job Object, so any host that holds a
+# kill-on-close job (packaged apps and some editors do) takes the watchdog - and
+# the relay under it - down the moment the call returns. Win32_Process.Create is
+# serviced by WmiPrvSE.exe, so what it creates sits outside the caller's tree;
+# and when the caller is packaged the new process carries no package identity,
+# which is what lets it resolve the real %LOCALAPPDATA% instead of a virtualised
+# view of it. It is still wscript.exe that runs, so the no-console-window rule
+# is untouched.
+$launched = $false
 try {
-    $listening = [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = 'wscript.exe "' + $watchVbs + '"'
+    } -ErrorAction Stop
+    $launched = ($created.ReturnValue -eq 0)
+    if (-not $launched) {
+        Write-Warn2 "WMI would not start the watchdog (return code $($created.ReturnValue))"
+    }
 } catch {
-    $listening = [bool](netstat -ano | Select-String ":$Port\s" | Select-String 'LISTENING')
+    Write-Warn2 'WMI is not available here'
 }
-if ($listening) {
-    Write-Ok "listening on 127.0.0.1:$Port"
-} else {
-    Write-Warn2 "not listening yet - check $logPath"
+if (-not $launched) {
+    # Fallback only. This watchdog dies with a kill-on-close caller, which is
+    # exactly the case the WMI launch above exists to avoid.
+    Write-Warn2 'falling back to a plain launch - the relay may not outlive this shell'
+    Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $watchVbs + '"') -WindowStyle Hidden
 }
+
+# Give it up to 30s: a cold Python start behind an antivirus scan is slow, and a
+# false failure here would undo a good install.
+$listening = $false
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+        $listening = [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
+    } catch {
+        $listening = [bool](netstat -ano | Select-String ":$Port\s" | Select-String 'LISTENING')
+    }
+    if ($listening) { break }
+}
+
+if (-not $listening) {
+    # Never point Codex at a port nothing is listening on: a config that looks
+    # installed but cannot answer is worse than no install at all.
+    if ($registered) {
+        Remove-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue
+        Write-Warn2 'removed the autostart entry again'
+    }
+    Write-Warn2 "nothing is listening on 127.0.0.1:$Port"
+    Write-Host ''
+    Write-Host 'config.toml was not changed.' -ForegroundColor Yellow
+    Write-Host "Log: $logPath" -ForegroundColor DarkGray
+    Write-Host ''
+    exit 1
+}
+Write-Ok "listening on 127.0.0.1:$Port"
 
 # ---------------------------------------------------------------- config
 # CODEX_HOME is what Codex itself honours; fall back to the default location.

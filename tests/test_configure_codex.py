@@ -16,15 +16,32 @@ write the registry, because a refused preflight exits before that code runs.
 import importlib.util
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+
+try:
+    import ctypes
+    import ctypes.wintypes
+    HAVE_WIN32 = os.name == 'nt'
+except (ImportError, AttributeError):  # pragma: no cover - non-Windows
+    HAVE_WIN32 = False
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('configure_codex', ROOT / 'scripts' / 'configure_codex.py')
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
+
+
+def port_is_open(port):
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=0.5):
+            return True
+    except OSError:
+        return False
 
 
 class ConfigFixture(unittest.TestCase):
@@ -302,6 +319,82 @@ class WindowsInstallerTests(ConfigFixture):
         self.assertNotEqual(0, result.returncode, result.stdout)
         self.assertIn('Configuration failed', result.stdout)
         self.assertEqual(before, self.path.read_bytes())
+
+    def test_the_relay_outlives_a_caller_that_closes_its_job(self):
+        # A host that keeps a kill-on-close Job Object (a packaged app, some
+        # editors) tears down every descendant of the shell it launched the
+        # installer from. Start-Process makes the watchdog such a descendant, so
+        # the relay dies with the host even though the install "succeeded".
+        # install.ps1 therefore starts the watchdog through WMI, which spawns
+        # from WmiPrvSE.exe and so sits outside the caller's tree.
+        if not HAVE_WIN32:
+            self.skipTest('ctypes/wintypes unavailable')
+
+        port = self.free_port()
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        job = [k32.CreateJobObjectW(None, None)]
+        self.assertNotEqual(0, job[0], 'CreateJobObjectW failed')
+        self.addCleanup(self.close_handle_once, k32, job)
+
+        limits = ctypes.create_string_buffer(144)
+        ctypes.wintypes.DWORD.from_buffer(limits, 16).value = 0x2000  # KILL_ON_JOB_CLOSE
+        self.assertTrue(k32.SetInformationJobObject(job[0], 9, limits, len(limits)))
+
+        env = os.environ.copy()
+        env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
+        env['CODEX_HOME'] = str(self.path.parent)
+        state_root = Path(self.temp.name) / 'job' / 'localappdata'
+        env['LOCALAPPDATA'] = str(state_root)
+        self.addCleanup(self.kill_relays_under, str(Path(self.temp.name) / 'job'))
+
+        proc = subprocess.Popen(
+            ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+             '-File', str(ROOT / 'scripts' / 'install.ps1'),
+             '-NoConfig', '-NoAutostart', '-Port', str(port)],
+            env=env, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace')
+        handle = k32.OpenProcess(0x0101, False, proc.pid)  # SET_QUOTA | TERMINATE
+        self.assertNotEqual(0, handle, 'OpenProcess failed')
+        self.assertTrue(k32.AssignProcessToJobObject(job[0], handle),
+                        'could not put the installer in the test job')
+        k32.CloseHandle(handle)
+
+        out, _ = proc.communicate(timeout=180)
+        self.assertEqual(0, proc.returncode, out)
+        self.assertIn('listening on 127.0.0.1:%d' % port, out)
+
+        # Closing the job is what a host does when it shuts down.
+        self.close_handle_once(k32, job)
+        time.sleep(3)
+        self.assertTrue(port_is_open(port),
+                        'the relay died with the caller job - the watchdog is a job member again')
+        log = state_root / 'codex-overload-fix' / 'relay.log'
+        self.assertTrue(log.exists(), 'no relay.log was written at %s' % log)
+        self.assertNotIn('Traceback', log.read_text(encoding='utf-8', errors='replace'))
+
+    @staticmethod
+    def free_port():
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+
+    @staticmethod
+    def close_handle_once(k32, holder):
+        if holder[0]:
+            k32.CloseHandle(holder[0])
+            holder[0] = 0
+
+    @staticmethod
+    def kill_relays_under(path):
+        # Match the generated launcher path, never the test runner's own command
+        # line, or this kills the process running it. The query itself carries
+        # the path on its own command line, so it excludes the query too.
+        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                        "Get-CimInstance Win32_Process | Where-Object { "
+                        "$_.CommandLine -like '*" + path.replace("'", "''") + "*' "
+                        "-and $_.CommandLine -notlike '*Get-CimInstance*' } | ForEach-Object { "
+                        "Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+                       capture_output=True, timeout=60)
 
 
 if __name__ == '__main__':

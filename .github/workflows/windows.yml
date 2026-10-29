@@ -125,4 +125,10 @@ jobs:
           if ($ps -notmatch 'wscript\.exe') {
             Write-Error "autostart no longer goes through wscript.exe"; exit 1
           }
-          Write-Host "launchers still use wscript + SW_HIDE"
+          # A Start-Process child inherits the caller's Job Object, so a host
+          # with a kill-on-close job takes the watchdog down with it. The WMI
+          # launch is what keeps the relay alive past the installer's parent.
+          if ($ps -notmatch 'Win32_Process' -or $ps -notmatch '-MethodName Create') {
+            Write-Error "the watchdog is no longer started through Win32_Process.Create"; exit 1
+          }
+          Write-Host "launchers still use wscript + SW_HIDE, spawned via WMI"
