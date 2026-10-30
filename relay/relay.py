@@ -21,6 +21,7 @@ import os
 import random
 import select
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -286,6 +287,14 @@ def analyze(handler, body):
     return " | " + (" ".join(parts) if parts else "empty")
 
 
+class LocalRelayServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind performs reverse DNS before listen(). That can
+        # block indefinitely on macOS even though this server is loopback-only.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.socket.getsockname()[:2]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -475,8 +484,8 @@ def main():
         host, _, port = ARGS.proxy.replace("http://", "").partition(":")
         ARGS.proxy = (host, int(port or 80))
 
-    log(f"relay listening on 127.0.0.1:{ARGS.port} -> https://{ARGS.upstream} via {ARGS.proxy}")
-    srv = ThreadingHTTPServer(("127.0.0.1", ARGS.port), Handler)
+    srv = LocalRelayServer(("127.0.0.1", ARGS.port), Handler)
+    log(f"relay listening on 127.0.0.1:{ARGS.port} -> {ARGS.upstream_scheme}://{ARGS.upstream} via {ARGS.proxy}")
     srv.daemon_threads = True
     try:
         srv.serve_forever()

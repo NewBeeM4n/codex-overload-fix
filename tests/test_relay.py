@@ -15,6 +15,7 @@ import threading
 import time
 import types
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,11 +50,22 @@ def event(value):
     return b'data: ' + json.dumps(value).encode() + b'\n\n'
 
 
+class RelayStartupTests(unittest.TestCase):
+    def test_startup_never_waits_for_reverse_dns(self):
+        with mock.patch('socket.getfqdn', side_effect=AssertionError('unexpected reverse DNS')):
+            server = relay.LocalRelayServer(('127.0.0.1', 0), relay.Handler)
+            try:
+                self.assertEqual(server.server_name, '127.0.0.1')
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+
+
 class RelayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.upstream = ThreadingHTTPServer(('127.0.0.1', 0), MockUpstream)
-        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), relay.Handler)
+        cls.upstream = relay.LocalRelayServer(('127.0.0.1', 0), MockUpstream)
+        cls.server = relay.LocalRelayServer(('127.0.0.1', 0), relay.Handler)
         for server in (cls.upstream, cls.server):
             threading.Thread(target=server.serve_forever, daemon=True).start()
 
