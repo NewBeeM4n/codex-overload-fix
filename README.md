@@ -6,6 +6,8 @@ A local retry shim that makes **"Selected model is at capacity. Please try a dif
 >
 > This project cannot fix a degraded model. If the model itself has started answering worse than it used to, nothing here changes that. You can call it drinking poison to quench thirst — it suppresses the symptom, it does not treat the cause.
 >
+> **What actually worked for me:** the allocation turned out to be tied to the account. After moving to a brand-new Plus subscription, both the rejections and the quality drop disappeared. If your problems are persistent rather than occasional, that is the lever worth pulling first — see [The one thing that did help](#the-one-thing-that-did-help-a-different-account).
+>
 > But be fair about the comparison. Until OpenAI allocates more compute to your account, the real choice in front of you is not "this shim" versus "a model that works properly". It is "this shim" versus "being interrupted every two turns". **Between those two, there is no better option available to you.**
 
 **No git required:** [download v1.2.1 (zip)](https://github.com/NewBeeM4n/codex-overload-fix/releases/latest) — unzip and run `scripts\install.ps1` on Windows, `bash scripts/install-mac.sh` on macOS, or `bash scripts/install-linux.sh` on Linux.
@@ -333,6 +335,22 @@ Measured on the same machine, same account, over several sessions:
 
 ---
 
+## The one thing that did help: a different account
+
+Everything above was measured on a **single account**, and that is the limitation that matters most. When I moved to a **brand-new Plus subscription**, both problems — the `server_is_overloaded` rejections *and* the model answering noticeably worse — disappeared at once.
+
+That points at the allocation being attached to the **account**, not to the machine, the network or the model. It is one person's experience, n = 1, not a controlled measurement: I cannot rule out that this account's capacity changed for an unrelated reason at the same moment. But the correlation was exact, and it is cheap to test yourself.
+
+So, ordered by how much each one actually changes your day:
+
+1. **A different account.** If the rejections and the quality drop arrived together and have both persisted for days, this is the lever with the largest effect — larger than anything in this repository.
+2. **Smaller requests.** What the pruning advice below and the relay's retry both buy you.
+3. **Retry.** What the relay does reliably, on every account.
+
+This does not make the relay pointless. On a fresh account it still earns its place the first time a large attachment runs into a busy window. It just cannot restore capacity an account no longer has.
+
+---
+
 ## What the upstream fix should look like
 
 Shedding load is the right mechanism — a server-side queue at this scale turns into a stampede when clients time out and retry. The problem is how the shed is signalled:
@@ -346,7 +364,7 @@ Shedding load is the right mechanism — a server-side queue at this scale turns
 
 ## Limitations
 
-**This does not fix a degraded model.** If the model itself has started answering worse than it used to — whatever the cause — nothing here changes that. The shim only stops the capacity error from interrupting you; it cannot make the model smarter. What it does is turn *unusable* into *usable*. That is a smaller claim than "fixed", and it is the honest one.
+**This does not fix a degraded model.** If the model itself has started answering worse than it used to — whatever the cause — nothing here changes that. The shim only stops the capacity error from interrupting you; it cannot make the model smarter. What it does is turn *unusable* into *usable*. That is a smaller claim than "fixed", and it is the honest one. The one thing that did change both at once was a different account — see [above](#the-one-thing-that-did-help-a-different-account).
 
 - Single machine, single account, small samples. The size correlation is the signal; the specific percentages are noise-prone.
 - **I can't tell whether a retried request ends up on a different model than the one I asked for.** The shim sends the same model id every time, and the response's `served` model field can be logged to check — but I haven't seen a case where I could rule it out. For a Plus account the trade-off was worth it: at least it works at all.
