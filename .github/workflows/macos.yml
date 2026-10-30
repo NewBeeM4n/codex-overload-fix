@@ -102,16 +102,21 @@ jobs:
           PY
           bash /tmp/argv.sh &
           RELAY_PID=$!
+          sleep 1
+          ps -p "$RELAY_PID" -o pid,stat,command || true
+          lsof -nP -iTCP:8787 -sTCP:LISTEN || true
           python3 - <<'PY'
           import socket, sys, time
           deadline = time.time() + 20
+          last = None
           while time.time() < deadline:
               try:
                   socket.create_connection(("127.0.0.1", 8787), timeout=0.5).close()
                   sys.exit(0)
-              except OSError:
+              except OSError as exc:
+                  last = exc
                   time.sleep(0.25)
-          sys.exit("the plist argv never listened on 127.0.0.1:8787")
+          sys.exit("the plist argv never listened on 127.0.0.1:8787: %r" % last)
           PY
           echo "plist argv listens"
           kill "$RELAY_PID" 2>/dev/null || true
