@@ -105,6 +105,8 @@ jobs:
           sleep 1
           ps -p "$RELAY_PID" -o pid,stat,command || true
           lsof -nP -iTCP:8787 -sTCP:LISTEN || true
+          sample "$RELAY_PID" 2 -file /tmp/relay-sample.txt >/dev/null 2>&1 || true
+          head -n 100 /tmp/relay-sample.txt || true
           python3 - <<'PY'
           import socket, sys, time
           deadline = time.time() + 20
