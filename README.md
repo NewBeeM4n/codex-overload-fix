@@ -360,13 +360,15 @@ Shedding load is the right mechanism — a server-side queue at this scale turns
 
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
 <a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
-<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>
+<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>&nbsp;
+<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>
 
 | contributor | contribution |
 |---|---|
 | [@NewBeeM4n](https://github.com/NewBeeM4n) | The relay and every measurement behind it, the Windows and macOS launchers, the release tooling, the documentation. |
 | [@JSVan32](https://github.com/JSVan32) | The Linux launcher — `scripts/install-linux.sh`, `scripts/uninstall-linux.sh` and `.github/workflows/linux.yml` — in [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1). |
 | [@BronyaDev](https://github.com/BronyaDev) | The safe editor for `config.toml` that all three installers now use: the span-splicing approach, the refusal rules and the install/remove round-trip tests, from [his fork](https://github.com/BronyaDev/codex-overload-fix) (`c38c18d4`, `c440a855`). Ported into `scripts/configure_codex.py` and `tests/test_configure_codex.py` with his design intact; what changed is listed in that file's header. |
+| [@ZenAlexa](https://github.com/ZenAlexa) | The Windows startup-boundary report in [#2](https://github.com/NewBeeM4n/codex-overload-fix/issues/2), with a self-contained kill-on-close Job Object reproduction. It found a real bug: the installer started the watchdog with `Start-Process`, so it stayed a member of the caller's job and the relay died with the installing host. The installer now launches through `Win32_Process.Create`, waits for the port, and leaves `config.toml` alone if it never comes up; the scenario is a regression test in `tests/test_configure_codex.py`. |
 
 Contributions of any size are welcome: a bug report, a measurement from your own machine, a correction to something above, or a fix. Open an issue or a pull request.
 

@@ -360,13 +360,15 @@ python tools\check_console_flash.py
 
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
 <a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
-<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>
+<a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>&nbsp;
+<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>
 
 | 贡献者 | 贡献内容 |
 |---|---|
 | [@NewBeeM4n](https://github.com/NewBeeM4n) | 中继本体和它背后全部的实测数据、Windows 与 macOS 启动脚本、打包工具、文档。 |
 | [@JSVan32](https://github.com/JSVan32) | Linux 启动脚本 —— `scripts/install-linux.sh`、`scripts/uninstall-linux.sh` 和 `.github/workflows/linux.yml`，见 [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1)。 |
 | [@BronyaDev](https://github.com/BronyaDev) | 三平台安装脚本现在都在用的那份 `config.toml` 安全编辑器：按字符位置拼接的思路、拒绝规则，以及安装/卸载往返测试，来自[他的 fork](https://github.com/BronyaDev/codex-overload-fix)（`c38c18d4`、`c440a855`）。移植进 `scripts/configure_codex.py` 和 `tests/test_configure_codex.py`，设计原样保留；改动之处列在那个文件开头的说明里。 |
+| [@ZenAlexa](https://github.com/ZenAlexa) | [#2](https://github.com/NewBeeM4n/codex-overload-fix/issues/2) 里那份 Windows 启动边界的报告，附了一个自带完整代码的 kill-on-close Job Object 复现脚本。它找出了一个真 bug：安装器用 `Start-Process` 起看门狗，看门狗因此一直是调用者 job 的成员，安装它的宿主一退出中继就跟着死。现在安装器改走 `Win32_Process.Create`，并且会等端口真的起来；起不来就一个字都不动 `config.toml`。这个场景已经固化成了 `tests/test_configure_codex.py` 里的回归测试。 |
 
 任何形式的贡献都欢迎：一个 bug 报告、一次你在自己机器上的实测、对上文某处的纠正，或者一个修复。开 issue 或提 PR 都行。
 
