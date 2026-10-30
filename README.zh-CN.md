@@ -103,8 +103,8 @@ Selected model is at capacity. Please try a different model.
 `relay/relay.py` 是一个单文件、纯标准库的 HTTP 中继。它站在 Codex 和真实端点之间，做三件事：
 
 1. **认出 overload。** 逐行解析 SSE，匹配 `server_is_overloaded`、`server_overloaded`、`service_unavailable_error`、`flex_unavailable`、`queue_full`，以及 HTTP 429/5xx。
-2. **只在 commit 之前重试。** 一旦吐出过任何 `response.output_text.delta` 或 `response.reasoning_summary_text.delta`，就直接放行原流。永远不会生成两遍。
-3. **你停它就停。** 它会窥探客户端 socket，Codex 取消回合或退出时立即放弃重试，不空烧额度。
+2. **只在 commit 之前重试。** 一旦开始向客户端传送流，后续事件会直接放行，中继不再重试。开始传送前若网络断开，上游仍可能收到多次请求。
+3. **你停止后，它会停止重试。** 它在两次尝试之间检查客户端连接；正在进行的上游请求或等待可能先结束。
 
 其余全部字节透明：请求体（含 zstd 压缩的）、鉴权头、SSE 内容原样转发，不做任何修改。
 
@@ -163,6 +163,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 
 加 `-NoConfig` 可以跳过第 4 步，改为打印你需要粘贴的片段。
 
+Windows 启动器和日志现在放在 `%USERPROFILE%\.codex-overload-fix`，避开部分打包宿主会虚拟化的 LocalAppData 目录。登录自启动项写入包外可见的用户注册表。安装器会用签名挑战确认目标中继，而不是仅凭端口开放判断成功。这能防止意外的端口冲突；同一用户下的其他进程仍可能读取本地身份密钥。报告者使用的 Windows 11 和旧版 Codex 组合仍待验证。
+
+**从旧版本升级：**先运行新版本的 `scripts\uninstall.ps1`，再安装。旧中继无法响应身份验证，安装器会拒绝复用它占用的端口。Windows 可用 `-StateDir` 指定其他状态目录，卸载时传入相同的值。默认卸载器也能识别旧的 `%LOCALAPPDATA%\codex-overload-fix` 目录。
+
 ### macOS
 
 ```bash
@@ -217,7 +221,7 @@ bash scripts/uninstall-linux.sh                # 卸载，加 --purge 连日志�
 
 ### 三个平台都一样，然后
 
-这一步安装脚本已经替你做完了。它改的是 `~/.codex/config.toml`（Windows 上是 `%USERPROFILE%\.codex\config.toml`；设了 `$CODEX_HOME` 就是 `$CODEX_HOME/config.toml`），而且只碰下面这两处，所以注释、键的顺序和其他所有设置都原样保留。它不会猜：文件里有它完全不理解的内容时，它会说明原因，然后什么都不装。
+确认中继已经就绪后，安装脚本会替你做这一步。Linux/macOS 使用 `--no-autostart` 或用户服务管理器不可用时，配置会保持不变；先启动中继，再重新运行安装脚本。它改的是 `~/.codex/config.toml`（Windows 上是 `%USERPROFILE%\.codex\config.toml`；设了 `$CODEX_HOME` 就是 `$CODEX_HOME/config.toml`），而且只碰下面这两处，所以注释、键的顺序和其他所有设置都原样保留。它不会猜：文件里有它完全不理解的内容时，它会说明原因，然后什么都不装。
 
 如果你之前加了 `--no-config` / `-NoConfig`，或者安装器判断无法安全改写、打印了片段，就手动加上这一段：
 
@@ -245,7 +249,7 @@ request_max_retries = 10
 - **macOS：** `bash scripts/uninstall-mac.sh`（加 `--purge` 连日志一起删）
 - **Linux：** `bash scripts/uninstall-linux.sh`（加 `--purge` 连日志一起删）
 
-卸载脚本会用安装时留下的备份把 `config.toml` 逐字节恢复，你不用再手动删任何东西。它**先恢复配置，再停中继**；如果文件已经和当初写入的内容对不上，它会拒绝停任何东西——中继停了而 Codex 还指着一个死端口，比让它继续跑更糟。之后重启 Codex。
+卸载脚本会用安装时留下的备份把 `config.toml` 逐字节恢复，你不用再手动删任何东西。它**先恢复配置，再停中继**；如果文件已经和当初写入的内容对不上，它会拒绝停任何东西——中继停了而 Codex 还指着一个死端口，比让它继续跑更糟。如果缺少 Python 或配置编辑器，卸载会停止并保留中继。之后重启 Codex。
 
 如果你是从 `--no-config` / `-NoConfig` 装的，那就自己删掉 `model_provider` 那行和 `[model_providers.openai-retry]` 整块。
 
@@ -290,10 +294,10 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 ## 安全吗
 
 - **不碰你的凭证。** 转发时用的就是 Codex 自己发出的头，包括你的 OAuth token。中继不存储、不记录、不发送到任何其他地方。
-- **不修改请求体。** 逐字节转发。
+- **不修改请求体。** 逐字节转发。中继日志只记录事件类型和请求体积统计，不记录事件原文；旧版本日志可能包含回答片段。
 - **不绕过任何限制。** 它只是重试一个服务端拒绝服务的请求。用的是官方支持的 custom provider 机制——很多人用它把 Codex 指向 Ollama 或 LM Studio。
 - **它是本地的，而且它不是「反代」。** 这是 `127.0.0.1` 上的一个 Python 进程，直接转发到官方端点。没有第三方服务器、没有共享账号池、没有中间人看得到你的 token —— 和人们通常说的镜像站 / 反代站正好相反。从 `config.toml` 删掉一行就回到直连。
-- **只在什么都没生成时重试**，所以不可能出现重复或拼接的输出。
+- **只在输出交给客户端之前重试。** 一旦开始传送，后续事件和错误会交给客户端处理，中继不再自行重试。
 - **它唯一改的文件是 `config.toml`，而且只改里面的两处。** `scripts/configure_codex.py` 按字符位置定位已有的 `model_provider` 语句和 `[model_providers.openai-retry]` 表，然后拼接文本，所以注释、顺序、换行符和 BOM 都原样保留；只有改完的内容能通过解析，它才落盘。遇到它不完全理解的内容——嵌套表、被手改过的中继块、读不了的文件——它直接拒绝，并且一个字节都不写。安装→卸载前后逐字节相同，包括「安装前根本没有 `config.toml`」这种情况。这一点由 `tests/test_configure_codex.py` 和三个平台的工作流逐次验证。
 - **关于封号风险：** 我不能保证为零 —— 任何改变了请求时序的客户端都不属于默认行为。但它**没有**做共享凭证、伪造客户端、绕过额度、逆向协议这几件事。它重发的请求，服务端此前已经明确拒绝过，本质和你手动点重试是同一个动作，只是发生在错误弹到你面前之前。想更保守可以把 `--max-attempts` 调到 10，并把退避拉长。
 

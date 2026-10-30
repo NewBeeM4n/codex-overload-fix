@@ -294,6 +294,7 @@ class WindowsInstallerTests(ConfigFixture):
         env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
         env['CODEX_HOME'] = str(self.path.parent)
         env['LOCALAPPDATA'] = str(Path(self.temp.name) / 'localappdata')
+        env['USERPROFILE'] = str(Path(self.temp.name) / 'profile')
         return subprocess.run(
             ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
              '-File', str(ROOT / 'scripts' / script), *args],
@@ -307,8 +308,20 @@ class WindowsInstallerTests(ConfigFixture):
         self.assertNotEqual(0, result.returncode, result.stdout)
         self.assertIn('Configuration failed', result.stdout)
         self.assertEqual(original, self.path.read_bytes())
-        state_dir = Path(self.temp.name) / 'localappdata' / 'codex-overload-fix'
+        state_dir = Path(self.temp.name) / 'profile' / '.codex-overload-fix'
         self.assertFalse(state_dir.exists(), 'the installer wrote files after refusing the config')
+
+    def test_install_rejects_foreign_listener_without_changing_config(self):
+        self.write('model = "keep"\n')
+        before = self.path.read_bytes()
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            result = self.run_ps('install.ps1', '-NoAutostart', '-Port', str(port))
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertIn('unverified or older relay', result.stdout)
+        self.assertEqual(before, self.path.read_bytes())
 
     def test_uninstall_refuses_a_config_it_cannot_restore_and_keeps_the_relay(self):
         config.apply('install', self.path)
@@ -345,6 +358,7 @@ class WindowsInstallerTests(ConfigFixture):
         env['CODEX_HOME'] = str(self.path.parent)
         state_root = Path(self.temp.name) / 'job' / 'localappdata'
         env['LOCALAPPDATA'] = str(state_root)
+        env['USERPROFILE'] = str(Path(self.temp.name) / 'job' / 'profile 测试')
         self.addCleanup(self.kill_relays_under, str(Path(self.temp.name) / 'job'))
 
         proc = subprocess.Popen(
@@ -368,7 +382,7 @@ class WindowsInstallerTests(ConfigFixture):
         time.sleep(3)
         self.assertTrue(port_is_open(port),
                         'the relay died with the caller job - the watchdog is a job member again')
-        log = state_root / 'codex-overload-fix' / 'relay.log'
+        log = Path(env['USERPROFILE']) / '.codex-overload-fix' / 'relay.log'
         self.assertTrue(log.exists(), 'no relay.log was written at %s' % log)
         self.assertNotIn('Traceback', log.read_text(encoding='utf-8', errors='replace'))
 

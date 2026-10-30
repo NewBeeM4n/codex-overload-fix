@@ -5,14 +5,14 @@ on:
     paths:
       - 'scripts/*.sh'
       - 'scripts/configure_codex.py'
-      - 'relay/relay.py'
+      - 'relay/**'
       - 'tests/**'
       - '.github/workflows/linux.yml'
   pull_request:
     paths:
       - 'scripts/*.sh'
       - 'scripts/configure_codex.py'
-      - 'relay/relay.py'
+      - 'relay/**'
       - 'tests/**'
   workflow_dispatch:
 

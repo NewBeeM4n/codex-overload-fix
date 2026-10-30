@@ -3,18 +3,20 @@ name: Windows installers
 on:
   push:
     paths:
+      - 'scripts/windows-autostart.ps1'
       - 'scripts/install.ps1'
       - 'scripts/uninstall.ps1'
       - 'scripts/configure_codex.py'
-      - 'relay/relay.py'
+      - 'relay/**'
       - 'tests/**'
       - '.github/workflows/windows.yml'
   pull_request:
     paths:
+      - 'scripts/windows-autostart.ps1'
       - 'scripts/install.ps1'
       - 'scripts/uninstall.ps1'
       - 'scripts/configure_codex.py'
-      - 'relay/relay.py'
+      - 'relay/**'
       - 'tests/**'
   workflow_dispatch:
 
@@ -49,8 +51,8 @@ jobs:
       - name: Syntax of every script
         shell: pwsh
         run: |
-          python -m py_compile scripts/configure_codex.py tests/test_configure_codex.py
-          foreach ($f in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+          python -m py_compile scripts/configure_codex.py relay/relay.py relay/identity.py tests/test_configure_codex.py tests/test_relay.py
+          foreach ($f in 'scripts/install.ps1', 'scripts/uninstall.ps1', 'scripts/windows-autostart.ps1') {
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null

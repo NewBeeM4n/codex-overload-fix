@@ -50,9 +50,7 @@ if [ "$NO_CONFIG" -eq 0 ]; then
             exit 1
         fi
     else
-        say "python3 or configure_codex.py not found; leaving config.toml alone"
-        printf 'Remove the model_provider line and the [model_providers.openai-retry]\n' >&2
-        printf 'table from ~/.codex/config.toml by hand.\n' >&2
+        die "python3 or configure_codex.py is missing; config.toml and the relay were left untouched"
     fi
 fi
 

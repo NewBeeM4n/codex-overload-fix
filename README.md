@@ -103,7 +103,7 @@ And on a long-running thread, the app's own log reported `pre_compression_bytes 
 `relay/relay.py` is a single-file, stdlib-only HTTP shim. It sits between Codex and the real endpoint and does three things:
 
 1. **Recognises the overload.** It parses the SSE stream and matches `server_is_overloaded`, `server_overloaded`, `service_unavailable_error`, `flex_unavailable`, `queue_full`, and HTTP 429/5xx.
-2. **Retries — but only before commit.** Once any `response.output_text.delta` or `response.reasoning_summary_text.delta` has been emitted, it passes the stream straight through. Nothing is ever generated twice.
+2. **Retries — but only before commit.** Once the stream is committed, later events pass through without a relay retry. A network failure before commit can still cause the upstream to receive a request more than once.
 3. **Stops when you stop.** It peeks the client socket; if Codex cancelled the turn or exited, retries are abandoned instead of burning quota.
 
 Everything else is byte-transparent: request bodies (including zstd-compressed ones), auth headers and SSE payloads are forwarded untouched.
@@ -163,6 +163,10 @@ The installer will:
 
 Add `-NoConfig` to skip step 4 and print the snippet to paste instead.
 
+The Windows launchers and logs now live in `%USERPROFILE%\.codex-overload-fix`, outside the LocalAppData path that some packaged hosts virtualize. The Run entry is written through the unvirtualized user registry. Readiness requires a signed challenge from the intended relay, not just an open port. This protects against accidental port conflicts; another process running as the same user can still access the local identity key. The issue reporter's exact Windows 11 / older Codex environment remains unverified.
+
+**Upgrading from an older installation:** run the new `scripts\uninstall.ps1` first, then install again. An existing older relay cannot answer the identity challenge, so the installer refuses to reuse its port. `-StateDir` can choose another Windows state directory; pass the same value to the uninstaller. The default uninstaller also recognizes the old `%LOCALAPPDATA%\codex-overload-fix` location.
+
 ### macOS
 
 ```bash
@@ -217,7 +221,7 @@ Two Linux-specific notes:
 
 ### All platforms, then
 
-The installers do this for you. Each one edits `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml` if that variable is set) and touches only the two entries below, so comments, key order and every unrelated setting survive untouched. It refuses rather than guesses: if the file holds something it does not fully understand, it prints why and installs nothing.
+Once the relay is verified as ready, the installers do this for you. With `--no-autostart` or without a usable user service manager, Linux/macOS leave the config unchanged until you start the relay and run the installer again. Each installer edits `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml` if that variable is set) and touches only the two entries below, so comments, key order and every unrelated setting survive untouched. It refuses rather than guesses: if the file holds something it does not fully understand, it prints why and installs nothing.
 
 If you passed `--no-config` / `-NoConfig`, or the installer could not edit the file safely and printed the snippet instead, add this by hand:
 
@@ -245,7 +249,7 @@ Nothing is permanent, and the relay is stopped the same way on every platform:
 - **macOS:** `bash scripts/uninstall-mac.sh` (add `--purge` to delete the log too)
 - **Linux:** `bash scripts/uninstall-linux.sh` (add `--purge` to delete the log too)
 
-The uninstallers restore `config.toml` from the backup taken at install, byte for byte, so you do not have to remove anything by hand. They restore it *before* stopping the relay, and refuse to stop anything if the file no longer matches what was written — a relay stopped with Codex still pointed at it is worse than one left running. Restart Codex afterwards.
+The uninstallers restore `config.toml` from the backup taken at install, byte for byte, so you do not have to remove anything by hand. They restore it *before* stopping the relay, and refuse to stop anything if the file no longer matches what was written — a relay stopped with Codex still pointed at it is worse than one left running. If Python or the configuration editor is missing, uninstall stops without disabling the relay. Restart Codex afterwards.
 
 If you installed with `--no-config` / `-NoConfig`, remove the `model_provider` line and the `[model_providers.openai-retry]` block yourself.
 
@@ -290,10 +294,10 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 ## Is this safe?
 
 - **It does not touch your credentials.** Requests are forwarded with the headers Codex already sent, including your OAuth token. The shim never stores, logs or transmits them anywhere else.
-- **It does not modify request bodies.** Byte-for-byte passthrough.
+- **It does not modify request bodies.** Byte-for-byte passthrough. Relay logs record event types and request-size statistics, not event payloads; logs from older versions may contain response fragments.
 - **It does not bypass a limit.** It retries a request that the server declined to serve. It uses the same public custom-provider mechanism that people use to point Codex at Ollama or LM Studio.
 - **It is local, and it is not a relay service.** This is a Python process on `127.0.0.1` that forwards to the official endpoint. There is no third-party server, no shared account pool, no middleman that sees your token — the opposite of the mirror/shared-account services people usually mean by "reverse proxy". Delete one line from `config.toml` and you are back to direct connections.
-- **It retries only when nothing was generated**, so you cannot get duplicated or spliced output.
+- **It retries before committing output to the client.** After a stream is committed, later events and errors are forwarded without a relay retry; the client decides how to recover.
 - **The one file it edits is `config.toml`, and only two entries in it.** `scripts/configure_codex.py` finds the existing `model_provider` statement and the `[model_providers.openai-retry]` table by span and splices text, so comments, ordering, line endings and a BOM all survive; it writes only after the result parses. It refuses anything it does not fully understand — a nested table, a hand-edited relay block, a file it cannot read — and writes nothing in that case. Install→uninstall is byte-identical, including the case where there was no `config.toml` before install. That is checked by `tests/test_configure_codex.py` and by all three platform workflows.
 - **On account risk:** I can't promise zero, since any client that changes request timing is outside the default behaviour. What it does *not* do is share credentials, impersonate the client, bypass quota, or reverse-engineer the protocol. It re-sends a request the server already declined — the same action as clicking retry, just before the error reaches you. If you want to be conservative, lower `--max-attempts` to 10 and widen the backoff.
 

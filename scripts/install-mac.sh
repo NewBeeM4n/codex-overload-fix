@@ -63,6 +63,8 @@ esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 RELAY="$ROOT/relay/relay.py"
 CONFIG_PY="$ROOT/scripts/configure_codex.py"
+IDENTITY_PY="$ROOT/relay/identity.py"
+IDENTITY_FILE="$STATE_DIR/identity.key"
 [ -f "$RELAY" ] || die "relay/relay.py not found under $ROOT"
 if [ "$NO_CONFIG" -eq 0 ] && [ ! -f "$CONFIG_PY" ]; then
     warn "configure_codex.py not found under $ROOT; running as if --no-config"
@@ -82,8 +84,11 @@ ok "Python $("$PYTHON_PATH" -c 'import sys; print("%d.%d" % sys.version_info[:2]
 LOG_PATH="$STATE_DIR/relay.log"
 OUT_PATH="$STATE_DIR/relay.out"   # launchd's stdout/stderr, kept apart from the relay's own log
 
+relay_ready() {
+    "$PYTHON_PATH" "$IDENTITY_PY" check --identity-file "$IDENTITY_FILE" --port "$PORT" >/dev/null 2>&1
+}
 port_open() {
-    "$PYTHON_PATH" - "$1" <<'PY' >/dev/null 2>&1
+    "$PYTHON_PATH" - "$PORT" <<'PY' >/dev/null 2>&1
 import socket, sys
 try:
     with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=0.5):
@@ -120,7 +125,7 @@ import os, plistlib
 e = os.environ
 args = [e["PY_PATH"], e["RELAY"], "--port", e["PORT"], "--log", e["LOG_PATH"],
         "--max-attempts", "30", "--backoff-base", "1", "--backoff-max", "8",
-        "--total-budget", "300", "--commit-deadline", "120"]
+        "--total-budget", "300", "--commit-deadline", "120", "--identity-file", os.path.join(e["STATE_DIR"], "identity.key")]
 if e.get("PROXY"):
     args += ["--proxy", e["PROXY"]]
 plist = {
@@ -155,6 +160,10 @@ if [ "$NO_CONFIG" -eq 0 ]; then
 fi
 
 mkdir -p "$STATE_DIR" "$(dirname "$PLIST_PATH")"
+"$PYTHON_PATH" "$IDENTITY_PY" init --identity-file "$IDENTITY_FILE" || die "cannot create relay identity"
+if port_open && ! relay_ready; then
+    die "port $PORT is occupied by an unverified or older relay; stop it or choose another port (config.toml unchanged)"
+fi
 
 # ---------------------------------------------------------------- write plist
 LABEL="$LABEL" PLIST_PATH="$PLIST_PATH" PY_PATH="$PYTHON_PATH" RELAY="$RELAY" \
@@ -164,7 +173,7 @@ import os, plistlib
 e = os.environ
 args = [e["PY_PATH"], e["RELAY"], "--port", e["PORT"], "--log", e["LOG_PATH"],
         "--max-attempts", "30", "--backoff-base", "1", "--backoff-max", "8",
-        "--total-budget", "300", "--commit-deadline", "120"]
+        "--total-budget", "300", "--commit-deadline", "120", "--identity-file", os.path.join(e["STATE_DIR"], "identity.key")]
 if e.get("PROXY"):
     args += ["--proxy", e["PROXY"]]
 plist = {
@@ -198,8 +207,8 @@ if [ "$NO_AUTOSTART" -eq 0 ]; then
     # seconds: this waits up to 30.
     i=0
     while [ "$i" -lt 120 ]; do
-        if port_open "$PORT"; then
-            ok "listening on 127.0.0.1:$PORT"
+        if relay_ready; then
+            ok "verified relay on 127.0.0.1:$PORT"
             break
         fi
         i=$((i + 1))
@@ -208,6 +217,7 @@ if [ "$NO_AUTOSTART" -eq 0 ]; then
     if [ "$i" -ge 120 ]; then
         warn "not listening after 30s - check $LOG_PATH"
         launchctl print "gui/$UID/$LABEL" 2>/dev/null | sed -n '1,5p' >&2 || true
+        die "relay could not be verified; config.toml was not changed"
     fi
 else
     say "plist written; not loaded (--no-autostart)"
@@ -217,6 +227,10 @@ fi
 # CODEX_HOME is what Codex itself honours; configure_codex.py resolves it too.
 CONFIG_PATH="${CODEX_HOME:-$HOME/.codex}/config.toml"
 MANUAL="$NO_CONFIG"
+if [ "$MANUAL" -eq 0 ] && ! relay_ready; then
+    say "Relay is not running; config.toml was not changed. Start the relay, then rerun the installer."
+    exit 0
+fi
 if [ "$MANUAL" -eq 0 ]; then
     say "Pointing Codex at the relay..."
     if "$PYTHON_PATH" "$CONFIG_PY" install --port "$PORT"; then

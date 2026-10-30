@@ -13,6 +13,8 @@ SSE stream is inspected to decide whether the attempt succeeded.
 
 import argparse
 import gzip
+import hashlib
+import hmac
 import http.client
 import json
 import os
@@ -23,6 +25,7 @@ import sys
 import threading
 import time
 import zlib
+from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOP_BY_HOP = {
@@ -137,7 +140,7 @@ def classify_event(payload):
         code = err.get("code") or ""
         msg = err.get("message") or ""
         if is_overload(err):
-            return "retry", f"{code or 'overload'}: {msg[:60]}"
+            return "retry", f"overload: {code or 'unknown'}"
         return "commit", f"non-retryable failure {code}"
     if kind in (
         "response.output_text.delta",
@@ -166,7 +169,8 @@ def attempt(path, headers, body, timeout, commit_by):
         conn.request("POST", path, body=body, headers=headers)
         resp = conn.getresponse()
     except Exception as exc:  # noqa: BLE001 - network failures are retryable
-        return "retry", 0, {}, b"", None, f"connect/read error: {exc!r}"
+        conn.close()
+        return "retry", 0, {}, b"", None, f"connect/read error: {exc.__class__.__name__}"
 
     if resp.status != 200:
         data = b""
@@ -177,7 +181,7 @@ def attempt(path, headers, body, timeout, commit_by):
         conn.close()
         status = resp.status
         if status in (429, 500, 502, 503, 504):
-            return "retry", status, {}, data, None, f"http {status}"
+            return "retry", status, dict(resp.getheaders()), data, None, f"http {status}"
         return "passthrough", status, dict(resp.getheaders()), data, None, ""
 
     prelude = bytearray()
@@ -188,10 +192,10 @@ def attempt(path, headers, body, timeout, commit_by):
             chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
         except Exception as exc:  # noqa: BLE001
             conn.close()
-            return "retry", 0, {}, bytes(prelude), None, f"stream error: {exc!r}"
+            return "retry", 0, {}, b"", None, f"stream error: {exc.__class__.__name__}"
         if not chunk:
             conn.close()
-            return "retry", 0, {}, bytes(prelude), None, "stream ended early"
+            return "retry", 0, {}, b"", None, "stream ended early"
         prelude.extend(chunk)
         buf += chunk
         # Only need the head of the stream to make the call.
@@ -212,7 +216,7 @@ def attempt(path, headers, body, timeout, commit_by):
                     _ev, _t = {}, "?"
                 _served = (_ev.get("response") or {}).get("model") if _ev else None
                 _tag = f"[served={_served}] " if _served else ""
-                log(f"  evt#{seen} {_t} {_tag}{payload[:200]!r}")
+                log(f"  evt#{seen} {_t} {_tag}".rstrip())
             verdict, info = classify_event(payload)
             if verdict == "retry":
                 conn.close()
@@ -289,6 +293,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _proxy(self):
+        # A nonce signed by the installer's local key proves a listener knows
+        # that key without sending the key or any Codex credentials to it.
+        parsed = urlsplit(self.path)
+        if self.command == "GET" and parsed.path == "/__codex_overload_health":
+            nonce = parse_qs(parsed.query).get("nonce", [""])[0]
+            if ARGS.identity_key and len(nonce) == 64 and all(c in "0123456789abcdef" for c in nonce):
+                proof = nonce + ":" + ARGS.relay_digest
+                signature = hmac.new(ARGS.identity_key, proof.encode("ascii"), hashlib.sha256).hexdigest()
+                self._send_simple(200, {"Content-Type": "text/plain"}, (ARGS.relay_digest + ":" + signature).encode("ascii"))
+            else:
+                self._send_simple(404, {"Content-Type": "text/plain"}, b"not found\n")
+            return
         path = self.path
         upstream_path = ARGS.upstream_prefix + path
         body = read_request_body(self)
@@ -322,14 +338,16 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"[{cport}] attempt {attempt_no}: upstream {status}, passthrough")
                 self._send_simple(status, resp_headers, prelude)
                 return
-            last = (status, prelude, resp)
+            last = (status, resp_headers, prelude)
             log(f"[{cport}] attempt {attempt_no}: retryable ({resp})")
             if attempt_no >= ARGS.max_attempts or time.time() >= deadline:
                 log(f"[{cport}] giving up after {attempt_no} attempts")
-                if last and last[1]:
-                    self._send_simple(200, {"Content-Type": "text/event-stream"}, last[1])
+                if last[0] == 200 and last[2]:
+                    self._send_simple(200, {"Content-Type": "text/event-stream"}, last[2])
+                elif last[0] and last[0] != 200:
+                    self._send_simple(last[0], last[1], last[2])
                 else:
-                    self._send_simple(503, {"Content-Type": "text/plain"}, b"relay: upstream overloaded\n")
+                    self._send_simple(503, {"Content-Type": "text/plain"}, b"relay: upstream unavailable\n")
                 return
             delay = min(ARGS.backoff_max, ARGS.backoff_base * (1.6 ** (attempt_no - 1)))
             delay *= random.uniform(0.7, 1.3)
@@ -369,8 +387,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
-        sent_text = b"response.output_text.delta" in prelude
-        buf = b""
+        # Once any event is committed, never retry or discard later data. The
+        # client owns recovery after that point, including partial tool output.
         try:
             self.wfile.write(prelude)
             self.wfile.flush()
@@ -378,38 +396,9 @@ class Handler(BaseHTTPRequestHandler):
                 chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
                 if not chunk:
                     break
-                buf += chunk
-                drop = False
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    line = line.strip()
-                    if not line.startswith(b"data:"):
-                        continue
-                    payload = line[5:].strip()
-                    low = payload.lower()
-                    if not (
-                        b"overload" in low
-                        or b"at capacity" in low
-                        or b'"response.failed"' in payload
-                    ):
-                        continue
-                    try:
-                        evt = json.loads(payload)
-                    except (ValueError, TypeError):
-                        continue
-                    err = (evt.get("response") or {}).get("error") or evt.get("error") or {}
-                    if is_overload(err) and not sent_text:
-                        log("mid-stream overload after commit -> dropping connection for client retry")
-                        drop = True
-                        break
-                if drop:
-                    conn.close()
-                    return
                 self.wfile.write(chunk)
                 self.wfile.flush()
-                if b"response.output_text.delta" in chunk:
-                    sent_text = True
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
             conn.close()
@@ -463,7 +452,16 @@ def main():
                    help="max seconds to hold the stream head while deciding to retry")
     p.add_argument("--timeout", type=float, default=600.0)
     p.add_argument("--log", default="")
+    p.add_argument("--identity-file", default="", help="local key for installer readiness verification")
     ARGS = p.parse_args()
+    ARGS.identity_key = b""
+    with open(__file__, "rb") as f:
+        ARGS.relay_digest = hashlib.sha256(f.read()).hexdigest()
+    if ARGS.identity_file:
+        with open(ARGS.identity_file, "rb") as f:
+            ARGS.identity_key = f.read()
+        if len(ARGS.identity_key) != 32:
+            p.error("invalid relay identity key")
 
     if ARGS.log and os.path.exists(ARGS.log):
         try:

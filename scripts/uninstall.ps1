@@ -14,13 +14,14 @@
     port would turn a fixable problem into "everything is broken".
 
 .PARAMETER Purge
-    Also delete %LOCALAPPDATA%\codex-overload-fix (launchers and logs).
+    Also delete the state directory (launchers and logs), including the legacy location.
 
 .PARAMETER NoConfig
     Leave config.toml alone; only stop and remove the relay.
 #>
 [CmdletBinding()]
 param(
+    [string]$StateDir = "",
     [switch]$Purge,
     [switch]$NoConfig
 )
@@ -34,7 +35,10 @@ Write-Host ""
 Write-Host "Codex Overload Fix - uninstaller" -ForegroundColor Cyan
 Write-Host "-------------------------------" -ForegroundColor DarkGray
 
-$stateDir = Join-Path $env:LOCALAPPDATA 'codex-overload-fix'
+$stateDir = if ($StateDir) { [IO.Path]::GetFullPath($StateDir) } else { Join-Path $env:USERPROFILE '.codex-overload-fix' }
+$legacyDir = Join-Path $env:LOCALAPPDATA 'codex-overload-fix'
+$stateDirs = @($stateDir, $legacyDir) | Select-Object -Unique
+. (Join-Path $PSScriptRoot 'windows-autostart.ps1')
 $runKey   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName  = 'CodexOverloadRelay'
 
@@ -69,33 +73,27 @@ if (-not $NoConfig) {
             exit 1
         }
     } else {
-        Write-Step 'Python not found; leaving config.toml alone'
-        Write-Host "Remove the model_provider line and the [model_providers.openai-retry] table by hand." -ForegroundColor Yellow
+        Write-Host 'Python or configure_codex.py is missing; config.toml and the relay were left untouched.' -ForegroundColor Red
+        exit 1
     }
 }
 
 # ---------------------------------------------------------------- autostart
-try {
-    $existing = Get-ItemProperty -Path $runKey -Name $runName -ErrorAction Stop
-    if ($existing) {
-        Remove-ItemProperty -Path $runKey -Name $runName
-        Write-Ok "removed $runName from HKCU Run"
-    }
-} catch {
-    Write-Step 'no autostart entry found'
-}
+# WMI accesses the unvirtualized current-user key even from packaged hosts.
+Set-RealRelayAutostart $runName "" $true
+Write-Ok "removed $runName from the real HKCU Run key (if present)"
 
 # ---------------------------------------------------------------- processes
 $killed = 0
 Get-CimInstance Win32_Process -Filter "Name = 'wscript.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like '*watch-relay.vbs*' } |
+    Where-Object { $line = $_.CommandLine; $line -and @($stateDirs | Where-Object { $line.IndexOf((Join-Path $_ 'watch-relay.vbs'), [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0 } |
     ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         $killed++
     }
 
 Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like '*relay.py*' } |
+    Where-Object { $line = $_.CommandLine; $line -and $line -like '*relay.py*' -and @($stateDirs | Where-Object { $line.IndexOf((Join-Path $_ 'relay.log'), [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0 } |
     ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         $killed++
@@ -109,9 +107,13 @@ if ($killed -gt 0) {
 
 # ---------------------------------------------------------------- purge
 if ($Purge) {
-    if (Test-Path $stateDir) {
-        Remove-Item -Recurse -Force $stateDir
-        Write-Ok "deleted $stateDir"
+    foreach ($dir in $stateDirs) {
+        $target = [IO.Path]::GetFullPath($dir).TrimEnd('\')
+        if (-not $target -or $target -eq [IO.Path]::GetPathRoot($target).TrimEnd('\')) { throw 'Refusing to purge a filesystem root' }
+        if (Test-Path -LiteralPath $target) {
+            Remove-Item -LiteralPath $target -Recurse -Force
+            Write-Ok "deleted $target"
+        }
     }
 }
 
