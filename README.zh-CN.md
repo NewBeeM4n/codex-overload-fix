@@ -1,3 +1,5 @@
+<p align="right"><a href="README.md" title="Switch to English"><img src="assets/lang-en.svg" alt="English" width="92" height="28"></a></p>
+
 # Codex 满载修复
 
 一个本地重试中继，让 **「Selected model is at capacity. Please try a different model.」** 不再打断你干活。

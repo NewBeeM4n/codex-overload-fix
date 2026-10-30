@@ -1,3 +1,5 @@
+<p align="right"><a href="README.zh-CN.md" title="切换到简体中文"><img src="assets/lang-zh.svg" alt="简体中文" width="92" height="28"></a></p>
+
 # Codex Overload Fix
 
 A local retry shim that makes **"Selected model is at capacity. Please try a different model."** stop interrupting your work.
