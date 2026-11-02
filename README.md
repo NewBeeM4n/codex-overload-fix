@@ -144,6 +144,19 @@ Deleting a remote plugin's cache does **not** work: the app re-downloads it on s
 
 ---
 
+## Use through a Skill
+
+Download the free MIT-licensed `codex-overload-fix-skill-1.4.0.zip` from [v1.4.0](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.4.0). It includes the Skill and complete runtime; no separate clone is needed.
+
+1. Extract the ZIP and keep the entire `codex-overload-fix` folder, including `runtime/`.
+2. Install the folder with your agent's local Skill installation mechanism. For clients supporting project skills in `.agents/skills`, place it at `.agents/skills/codex-overload-fix/`. Other clients may use different paths; follow their current documentation and refresh the agent.
+3. Ask: “Use the codex-overload-fix skill to diagnose my recurring Codex capacity error. Explain the changes before installing the relay.” To authorize setup: “Use the codex-overload-fix skill to install and verify the local relay on this machine.”
+4. After successful relay verification, fully restart Codex. To undo: “Use the codex-overload-fix skill to remove the relay and restore my configuration.”
+
+Installing the Skill makes instructions and runtime files available; it does not start a service or modify Codex configuration. Execution requires a local agent, Python 3.9+, and authorization to install. Other agents can help configure Codex; loading this Skill does not reroute their own model traffic. A cloud-only chat cannot install a service on your computer.
+
+Source: [SKILL.md](skills/codex-overload-fix/SKILL.md). Distribute the complete ZIP, not SKILL.md alone. Keep its installed location stable while the relay uses it; uninstall the relay before moving or deleting the Skill. Build with `python tools/make_skill_release.py v1.4.0 --out codex-overload-fix-skill-1.4.0.zip`. See the [official Skill documentation](https://developers.openai.com/codex/skills) for client-specific discovery rules.
+
 ## Quick start
 
 ### Windows
