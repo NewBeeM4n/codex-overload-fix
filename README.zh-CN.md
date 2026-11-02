@@ -146,7 +146,7 @@ enabled = false
 
 ## 通过 Skill 调用
 
-下载 [v1.4.0 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.4.0) 中免费、MIT 开源的 `codex-overload-fix-skill-1.4.0.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
+下载 [v1.4.1 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.4.1) 中免费、MIT 开源的 `codex-overload-fix-skill-1.4.1.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
 
 1. 解压 ZIP，保留整个 `codex-overload-fix` 文件夹，包括 `runtime/`。
 2. 按所用 Agent 的本地 Skill 安装方式安装。对于支持项目 `.agents/skills` 目录的客户端，放到 `.agents/skills/codex-overload-fix/`；其他客户端可能使用不同位置，请遵循其当前文档，必要时刷新或重启 Agent。
@@ -155,7 +155,7 @@ enabled = false
 
 安装 Skill 只会提供指令和运行文件，不会自动启动服务或修改配置。执行需要本地 Agent、Python 3.9+ 和安装授权。其他 Agent 可以帮助配置 Codex，但加载此 Skill 不会改变其他 Agent 自身的模型请求路径；纯云端聊天无法在你的电脑上安装服务。
 
-源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.4.0 --out codex-overload-fix-skill-1.4.0.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
+源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.4.1 --out codex-overload-fix-skill-1.4.1.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
 
 ## 快速开始
 
