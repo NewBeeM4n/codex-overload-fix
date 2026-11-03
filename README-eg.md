@@ -21,7 +21,7 @@ A local retry shim that makes **"Selected model is at capacity. Please try a dif
 
 ## A personal note and a small request for support
 
-Thank you for checking out and using this project. I work at **Zhishu (智枢)**, a platform that relays requests to Chinese AI models using official provider API keys. If that is something you need, you are welcome to scan the QR code below to add my colleague on WeChat. Send **【overload】** to receive **RMB 100 in platform credit**.
+Thank you for checking out and using this project. I work at **Zhishu (智枢)**, a platform that relays requests to Chinese AI models using official provider API keys. You are welcome to scan the QR code below to add my colleague on WeChat. **Anyone who adds my colleague on WeChat and sends the invitation code 【overload】 can receive RMB 100 in platform credit.**
 
 This project will remain free and open source. Thank you for supporting the project, and to anyone who chooses to support my work as well. For questions about this project or to share your experience, you can reach me on my personal QQ: **2996804841**. I will do my best to help.
 
