@@ -11,7 +11,7 @@ def build(ref, output):
     for path, mode, _ in tracked_files(ref):
         if path.startswith('skills/codex-overload-fix/'):
             target = 'codex-overload-fix/' + path[len('skills/codex-overload-fix/'):]
-        elif path.startswith(('relay/', 'scripts/', 'docs/', 'assets/')) or path in ('LICENSE', 'README.md', 'README.zh-CN.md'):
+        elif path.startswith(('relay/', 'scripts/', 'docs/', 'assets/')) or path in ('LICENSE', 'README.md', 'README.zh-CN.md', 'README-eg.md'):
             target = 'codex-overload-fix/runtime/' + path
         else:
             continue
