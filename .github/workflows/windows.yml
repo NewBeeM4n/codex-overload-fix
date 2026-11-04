@@ -9,6 +9,7 @@ on:
       - 'scripts/configure_codex.py'
       - 'relay/**'
       - 'tests/**'
+      - 'dashboard/**'
       - '.github/workflows/windows.yml'
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'scripts/configure_codex.py'
       - 'relay/**'
       - 'tests/**'
+      - 'dashboard/**'
   workflow_dispatch:
 
 permissions:

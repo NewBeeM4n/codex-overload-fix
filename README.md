@@ -12,7 +12,7 @@ A local retry shim that makes **"Selected model is at capacity. Please try a dif
 >
 > But be fair about the comparison. Until OpenAI allocates more compute to your account, the real choice in front of you is not "this shim" versus "a model that works properly". It is "this shim" versus "being interrupted every two turns". **Between those two, there is no better option available to you.**
 
-**No git required:** [download v1.2.1 (zip)](https://github.com/NewBeeM4n/codex-overload-fix/releases/latest) — unzip and run `scripts\install.ps1` on Windows, `bash scripts/install-mac.sh` on macOS, or `bash scripts/install-linux.sh` on Linux.
+**No git required:** [download the latest release (zip)](https://github.com/NewBeeM4n/codex-overload-fix/releases/latest) — unzip and run `scripts\install.ps1` on Windows, `bash scripts/install-mac.sh` on macOS, or `bash scripts/install-linux.sh` on Linux.
 
 | Before | After |
 |:---:|:---:|
@@ -144,7 +144,7 @@ Deleting a remote plugin's cache does **not** work: the app re-downloads it on s
 
 ## Use through a Skill
 
-Download the free MIT-licensed `codex-overload-fix-skill-1.4.1.zip` from [v1.4.1](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.4.1). It includes the Skill and complete runtime; no separate clone is needed.
+Download the free MIT-licensed `codex-overload-fix-skill-1.5.0.zip` from [v1.5.0](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.0). It includes the Skill and complete runtime; no separate clone is needed.
 
 1. Extract the ZIP and keep the entire `codex-overload-fix` folder, including `runtime/`.
 2. Install the folder with your agent's local Skill installation mechanism. For clients supporting project skills in `.agents/skills`, place it at `.agents/skills/codex-overload-fix/`. Other clients may use different paths; follow their current documentation and refresh the agent.
@@ -153,7 +153,7 @@ Download the free MIT-licensed `codex-overload-fix-skill-1.4.1.zip` from [v1.4.1
 
 Installing the Skill makes instructions and runtime files available; it does not start a service or modify Codex configuration. Execution requires a local agent, Python 3.9+, and authorization to install. Other agents can help configure Codex; loading this Skill does not reroute their own model traffic. A cloud-only chat cannot install a service on your computer.
 
-Source: [SKILL.md](skills/codex-overload-fix/SKILL.md). Distribute the complete ZIP, not SKILL.md alone. Keep its installed location stable while the relay uses it; uninstall the relay before moving or deleting the Skill. Build with `python tools/make_skill_release.py v1.4.1 --out codex-overload-fix-skill-1.4.1.zip`. See the [official Skill documentation](https://developers.openai.com/codex/skills) for client-specific discovery rules.
+Source: [SKILL.md](skills/codex-overload-fix/SKILL.md). Distribute the complete ZIP, not SKILL.md alone. Keep its installed location stable while the relay uses it; uninstall the relay before moving or deleting the Skill. Build with `python tools/make_skill_release.py v1.5.0 --out codex-overload-fix-skill-1.5.0.zip`. See the [official Skill documentation](https://developers.openai.com/codex/skills) for client-specific discovery rules.
 
 ## Quick start
 
@@ -316,6 +316,14 @@ What it *cannot* fix: a genuinely exhausted quota, an expired login, or a broken
 
 ---
 
+Normal JSON and compressed responses are passed through without SSE retries. Tool, reasoning, image and unknown output events commit the stream conservatively. Cancellation and the pre-output deadline interrupt blocked reads; Retry-After waits remain within the retry budget. A connection failure after sending a request has an uncertain outcome and is surfaced without automatically replaying that POST.
+
+## Optional local dashboard
+
+Run `python dashboard/server.py` (or `python3` on macOS/Linux), then open http://127.0.0.1:8899/ . For a custom state directory, use `python dashboard/server.py --log "/path/to/relay.log"`. Stop it with Ctrl+C. It is optional and is not registered at login. In a Skill bundle, run this command from the Skill's `runtime/` directory.
+
+The dashboard reads only the current log, showing request counts, retries, streams started, retry exhaustion, cancellations and HTTP errors. It does not capture answers or read credentials, does not expose raw logs, and binds only to loopback with Host/Origin checks and no cross-origin allowance. “Streams started” means forwarding began, not that the full answer succeeded. The default window is 60 minutes; use `--minutes 120` to change it. Rotated logs are not included. Missing logs and an idle relay are shown explicitly.
+
 ## Diagnostic tools
 
 | tool | what it does |
@@ -396,7 +404,11 @@ Shedding load is the right mechanism — a server-side queue at this scale turns
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
 <a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
 <a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>&nbsp;
-<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>
+<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>&nbsp;
+<a href="https://github.com/jdp22"><img src="https://github.com/jdp22.png?size=96" width="48" height="48" alt="jdp22"></a>&nbsp;
+<a href="https://github.com/lighthouser-agent"><img src="https://github.com/lighthouser-agent.png?size=96" width="48" height="48" alt="lighthouser-agent"></a>&nbsp;
+<a href="https://github.com/yyx0506"><img src="https://github.com/yyx0506.png?size=96" width="48" height="48" alt="yyx0506"></a>&nbsp;
+<a href="https://github.com/ballardmandy69"><img src="https://github.com/ballardmandy69.png?size=96" width="48" height="48" alt="ballardmandy69"></a>
 
 | contributor | contribution |
 |---|---|
@@ -404,6 +416,10 @@ Shedding load is the right mechanism — a server-side queue at this scale turns
 | [@JSVan32](https://github.com/JSVan32) | The Linux launcher — `scripts/install-linux.sh`, `scripts/uninstall-linux.sh` and `.github/workflows/linux.yml` — in [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1). |
 | [@BronyaDev](https://github.com/BronyaDev) | The safe editor for `config.toml` that all three installers now use: the span-splicing approach, the refusal rules and the install/remove round-trip tests, from [his fork](https://github.com/BronyaDev/codex-overload-fix) (`c38c18d4`, `c440a855`). Ported into `scripts/configure_codex.py` and `tests/test_configure_codex.py` with his design intact; what changed is listed in that file's header. |
 | [@ZenAlexa](https://github.com/ZenAlexa) | The Windows startup-boundary report in [#2](https://github.com/NewBeeM4n/codex-overload-fix/issues/2), with a self-contained kill-on-close Job Object reproduction. It found a real bug: the installer started the watchdog with `Start-Process`, so it stayed a member of the caller's job and the relay died with the installing host. The installer now launches through `Win32_Process.Create`, waits for the port, and leaves `config.toml` alone if it never comes up; the scenario is a regression test in `tests/test_configure_codex.py`. |
+| [@jdp22](https://github.com/jdp22) | The [visual dashboard fork](https://github.com/jdp22/codex-overload-fix-with-visual), starting at `de979ef5`: log parsing and local activity visualization inspired the optional statistics-only dashboard. Response capture and custom-upstream installer changes were not adopted. |
+| [@lighthouser-agent](https://github.com/lighthouser-agent) | The [fork's stream handling](https://github.com/lighthouser-agent/codex-overload-fix/blob/c0b0b9dd/relay/sse.py): conservative output boundaries, multiline SSE, cancellation/deadline handling and Retry-After informed the direct-endpoint reliability update. Third-party service adaptation was excluded. |
+| [@yyx0506](https://github.com/yyx0506) | The [fork](https://github.com/yyx0506/codex-overload-fix), starting at `6165ae54`: normal JSON response handling and image-output event coverage informed the direct-endpoint fixes. Account-pool and gateway features were excluded. |
+| [@ballardmandy69](https://github.com/ballardmandy69) | The [fork](https://github.com/ballardmandy69/codex-overload-fix), starting at `f3b374de`: incremental CR/LF/multiline SSE framing and conservative output classification. Alternative supervisors and Cloudflare 403 retries were excluded. |
 
 Contributions of any size are welcome: a bug report, a measurement from your own machine, a correction to something above, or a fix. Open an issue or a pull request.
 

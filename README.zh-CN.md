@@ -12,7 +12,7 @@
 >
 > 但对比要公平。在 OpenAI 给你的账户分配更多算力之前，真正摆在你面前的不是「这个中继」和「一个好用的模型」，而是「这个中继」和「每两轮被打断一次」。**这两者之间，你没有更好的方案。**
 
-**不想用 git：** [下载 v1.2.1 压缩包](https://github.com/NewBeeM4n/codex-overload-fix/releases/latest) —— 解压后 Windows 跑 `scripts\install.ps1`，macOS 跑 `bash scripts/install-mac.sh`，Linux 跑 `bash scripts/install-linux.sh`。
+**不想用 git：** [下载最新版本压缩包](https://github.com/NewBeeM4n/codex-overload-fix/releases/latest) —— 解压后 Windows 跑 `scripts\install.ps1`，macOS 跑 `bash scripts/install-mac.sh`，Linux 跑 `bash scripts/install-linux.sh`。
 
 | 修复前 | 修复后 |
 |:---:|:---:|
@@ -144,7 +144,7 @@ enabled = false
 
 ## 通过 Skill 调用
 
-下载 [v1.4.1 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.4.1) 中免费、MIT 开源的 `codex-overload-fix-skill-1.4.1.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
+下载 [v1.5.0 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.0) 中免费、MIT 开源的 `codex-overload-fix-skill-1.5.0.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
 
 1. 解压 ZIP，保留整个 `codex-overload-fix` 文件夹，包括 `runtime/`。
 2. 按所用 Agent 的本地 Skill 安装方式安装。对于支持项目 `.agents/skills` 目录的客户端，放到 `.agents/skills/codex-overload-fix/`；其他客户端可能使用不同位置，请遵循其当前文档，必要时刷新或重启 Agent。
@@ -153,7 +153,7 @@ enabled = false
 
 安装 Skill 只会提供指令和运行文件，不会自动启动服务或修改配置。执行需要本地 Agent、Python 3.9+ 和安装授权。其他 Agent 可以帮助配置 Codex，但加载此 Skill 不会改变其他 Agent 自身的模型请求路径；纯云端聊天无法在你的电脑上安装服务。
 
-源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.4.1 --out codex-overload-fix-skill-1.4.1.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
+源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.5.0 --out codex-overload-fix-skill-1.5.0.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
 
 ## 快速开始
 
@@ -316,6 +316,14 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 ---
 
+正常 JSON 和压缩响应直接透传，不会误按 SSE 重试。工具、推理、图片和未知输出事件会保守地开始转发。取消和输出前的截止时间可以打断阻塞读取，Retry-After 等待受总重试预算约束。请求发出后若网络中断，上游是否已经执行并不确定，因此会返回错误，不会自动重发该 POST。
+
+## 可选的本地可视化面板
+
+运行 `python dashboard/server.py`（macOS/Linux 也可用 `python3`），然后打开 http://127.0.0.1:8899/ 。如果安装时指定了其他状态目录，运行 `python dashboard/server.py --log "/日志所在路径/relay.log"`。按 Ctrl+C 停止。面板按需启动，不会注册登录自启动。使用独立 Skill 包时，请从 Skill 的 `runtime/` 目录运行此命令。
+
+面板只读取当前日志，展示请求数、重试数、开始转发、重试耗尽、取消和 HTTP 错误。不记录回答、不读取凭证、不提供原始日志接口；只监听本地回环地址，检查 Host/Origin，不开放跨域读取。“开始转发”不代表整次回答成功。默认显示最近 60 分钟，可用 `--minutes 120` 调整；不包含已经轮换的旧日志。找不到日志和没有活动时会明确显示。
+
 ## 诊断工具
 
 | 工具 | 作用 |
@@ -396,7 +404,11 @@ python tools\check_console_flash.py
 <a href="https://github.com/NewBeeM4n"><img src="https://avatars.githubusercontent.com/u/308389593?v=4&s=96" width="48" height="48" alt="NewBeeM4n"></a>&nbsp;
 <a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
 <a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>&nbsp;
-<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>
+<a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>&nbsp;
+<a href="https://github.com/jdp22"><img src="https://github.com/jdp22.png?size=96" width="48" height="48" alt="jdp22"></a>&nbsp;
+<a href="https://github.com/lighthouser-agent"><img src="https://github.com/lighthouser-agent.png?size=96" width="48" height="48" alt="lighthouser-agent"></a>&nbsp;
+<a href="https://github.com/yyx0506"><img src="https://github.com/yyx0506.png?size=96" width="48" height="48" alt="yyx0506"></a>&nbsp;
+<a href="https://github.com/ballardmandy69"><img src="https://github.com/ballardmandy69.png?size=96" width="48" height="48" alt="ballardmandy69"></a>
 
 | 贡献者 | 贡献内容 |
 |---|---|
@@ -404,6 +416,10 @@ python tools\check_console_flash.py
 | [@JSVan32](https://github.com/JSVan32) | Linux 启动脚本 —— `scripts/install-linux.sh`、`scripts/uninstall-linux.sh` 和 `.github/workflows/linux.yml`，见 [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1)。 |
 | [@BronyaDev](https://github.com/BronyaDev) | 三平台安装脚本现在都在用的那份 `config.toml` 安全编辑器：按字符位置拼接的思路、拒绝规则，以及安装/卸载往返测试，来自[他的 fork](https://github.com/BronyaDev/codex-overload-fix)（`c38c18d4`、`c440a855`）。移植进 `scripts/configure_codex.py` 和 `tests/test_configure_codex.py`，设计原样保留；改动之处列在那个文件开头的说明里。 |
 | [@ZenAlexa](https://github.com/ZenAlexa) | [#2](https://github.com/NewBeeM4n/codex-overload-fix/issues/2) 里那份 Windows 启动边界的报告，附了一个自带完整代码的 kill-on-close Job Object 复现脚本。它找出了一个真 bug：安装器用 `Start-Process` 起看门狗，看门狗因此一直是调用者 job 的成员，安装它的宿主一退出中继就跟着死。现在安装器改走 `Win32_Process.Create`，并且会等端口真的起来；起不来就一个字都不动 `config.toml`。这个场景已经固化成了 `tests/test_configure_codex.py` 里的回归测试。 |
+| [@jdp22](https://github.com/jdp22) | [可视化 Fork](https://github.com/jdp22/codex-overload-fix-with-visual)，自 `de979ef5` 起：日志解析和本地活动展示为可选统计面板提供了基础思路；未采用回答内容记录及自定义上游安装功能。 |
+| [@lighthouser-agent](https://github.com/lighthouser-agent) | [Fork 中的流处理](https://github.com/lighthouser-agent/codex-overload-fix/blob/c0b0b9dd/relay/sse.py)：参考其保守输出边界、多行 SSE、取消/超时及 Retry-After 处理，完善官方直连路径；未引入第三方服务适配。 |
+| [@yyx0506](https://github.com/yyx0506) | [Fork](https://github.com/yyx0506/codex-overload-fix)，自 `6165ae54` 起：参考正常 JSON 响应处理和图片输出事件覆盖；未引入账号池及网关功能。 |
+| [@ballardmandy69](https://github.com/ballardmandy69) | [Fork](https://github.com/ballardmandy69/codex-overload-fix)，自 `f3b374de` 起：参考 CR/LF、多行 SSE 的增量解析和保守输出分类；未引入替代进程管理器或 Cloudflare 403 重试。 |
 
 任何形式的贡献都欢迎：一个 bug 报告、一次你在自己机器上的实测、对上文某处的纠正，或者一个修复。开 issue 或提 PR 都行。
 

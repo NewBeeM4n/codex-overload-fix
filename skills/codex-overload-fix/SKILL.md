@@ -48,3 +48,7 @@ Use the corresponding `uninstall.ps1`, `uninstall-mac.sh`, or `uninstall-linux.s
 Require the installer's signed readiness verification before declaring installation successful. For Unix --no-autostart or unavailable service managers, the config may remain unchanged: report the remaining startup step. Ask the user to fully restart Codex after a provider change. If the active client cannot configure a custom Responses provider, explain that limitation instead of claiming the relay was connected.
 
 Summarize the operation, config backup, startup mechanism, verification, and undo command in the user's language. Do not claim a successful live model request unless it was actually tested. The relay retries only before committing output; failures after commit belong to the client.
+
+## Optional statistics dashboard
+
+When requested, run `python dashboard/server.py` from the runtime root and open http://127.0.0.1:8899/ . Use `--log` for a custom log location. It is a separate optional process, not an autostart service. It shows log-derived counts only; streams started are not completed answers. Do not add content capture or third-party gateway support. Stop the dashboard before removing its files.

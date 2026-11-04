@@ -11,7 +11,7 @@ def build(ref, output):
     for path, mode, _ in tracked_files(ref):
         if path.startswith('skills/codex-overload-fix/'):
             target = 'codex-overload-fix/' + path[len('skills/codex-overload-fix/'):]
-        elif path.startswith(('relay/', 'scripts/', 'docs/', 'assets/')) or path in ('LICENSE', 'README.md', 'README.zh-CN.md', 'README-eg.md'):
+        elif path.startswith(('relay/', 'scripts/', 'docs/', 'assets/', 'dashboard/')) or path in ('LICENSE', 'README.md', 'README.zh-CN.md', 'README-eg.md'):
             target = 'codex-overload-fix/runtime/' + path
         else:
             continue
@@ -22,6 +22,8 @@ def build(ref, output):
             'scripts/windows-autostart.ps1', 'scripts/install.ps1', 'scripts/uninstall.ps1',
             'scripts/install-mac.sh', 'scripts/uninstall-mac.sh',
             'scripts/install-linux.sh', 'scripts/uninstall-linux.sh')]
+    if any('/runtime/dashboard/' in target for target in entries):
+        required += ['codex-overload-fix/runtime/dashboard/' + name for name in ('server.py', 'index.html')]
     missing = set(required) - set(entries)
     if missing:
         raise ValueError('Missing required files: ' + ', '.join(sorted(missing)))
