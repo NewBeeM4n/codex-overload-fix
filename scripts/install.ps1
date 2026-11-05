@@ -77,10 +77,19 @@ foreach ($candidate in @('py -3', 'python', 'python3')) {
     $prefix = @()
     if ($parts.Count -gt 1) { $prefix = $parts[1..($parts.Count - 1)] }
     try {
-        $out = & $exe @prefix -c "import sys;print(sys.executable)" 2>$null
+        # Ask for JSON, not the bare path. On a machine whose user name is not
+        # ASCII, Python encodes stdout with the system locale (cp936 on zh-CN
+        # Windows) and Windows PowerShell 5.1 decodes that pipe as ANSI, so the
+        # Chinese characters in the path are mangled and Test-Path fails. The
+        # installer then reports "no usable Python" on a machine that clearly
+        # has one. json.dumps escapes every non-ASCII character as \uXXXX, so
+        # the pipe carries pure ASCII and the decoding no longer matters.
+        $out = & $exe @prefix -c "import sys,json;print(json.dumps(sys.executable))" 2>$null
     } catch { continue }
     if (-not $out) { continue }
-    $path = ($out | Select-Object -First 1).Trim()
+    $json = ($out | Select-Object -First 1).Trim()
+    if (-not $json) { continue }
+    try { $path = $json | ConvertFrom-Json } catch { continue }
     if (-not $path -or -not (Test-Path $path)) { continue }
     if ($path -match 'WindowsApps') { continue }   # Store stub
     $ver = & $path -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null

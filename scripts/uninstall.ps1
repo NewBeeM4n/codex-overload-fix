@@ -55,9 +55,16 @@ if (-not $NoConfig) {
         $prefix = @()
         if ($parts.Count -gt 1) { $prefix = $parts[1..($parts.Count - 1)] }
         try {
-            $out = & $exe @prefix -c "import sys;print(sys.executable)" 2>$null
+            # JSON, not the bare path: see install.ps1. On a machine whose user
+            # name is not ASCII, Python encodes stdout with the system locale
+            # and Windows PowerShell 5.1 decodes that pipe as ANSI, mangling the
+            # path. The uninstaller would then find no Python and refuse to
+            # restore config.toml. json.dumps keeps the pipe pure ASCII.
+            $out = & $exe @prefix -c "import sys,json;print(json.dumps(sys.executable))" 2>$null
         } catch { continue }
-        $path = ($out | Select-Object -First 1).Trim()
+        $json = ($out | Select-Object -First 1).Trim()
+        if (-not $json) { continue }
+        try { $path = $json | ConvertFrom-Json } catch { continue }
         if ($path -and (Test-Path $path) -and ($path -notmatch 'WindowsApps')) { $python = $path; break }
     }
 
