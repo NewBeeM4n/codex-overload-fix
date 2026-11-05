@@ -82,24 +82,24 @@ class ConfigurationTests(ConfigFixture):
         for original in originals:
             with self.subTest(original=original):
                 self.path.write_bytes(original)
-                config.apply('install', self.path)
+                config.apply_legacy('install', self.path)
                 installed = self.path.read_bytes()
                 self.assertIn(b'http://127.0.0.1:8787', installed)
-                config.apply('install', self.path)
+                config.apply_legacy('install', self.path)
                 self.assertEqual(installed, self.path.read_bytes(), 'second install changed the file')
-                config.apply('remove', self.path)
+                config.apply_legacy('remove', self.path)
                 self.assertEqual(original, self.path.read_bytes(), 'remove did not restore the original')
-                config.apply('remove', self.path)
+                config.apply_legacy('remove', self.path)
                 self.assertEqual(original, self.path.read_bytes(), 'second remove changed the file')
                 self.assertFalse(self.state.exists())
 
     def test_preserves_later_unrelated_edits_and_provider_selection(self):
         self.write('model_provider = "before"\nmodel = "first"\n')
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         updated = self.read().replace('model = "first"', 'model = "later"')
         updated = updated.replace(config.ROOT, 'model_provider = "user-choice"')
         self.write(updated + '\n[features]\napps = true\n')
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
         result = self.read()
         self.assertIn('model_provider = "user-choice"', result)
         self.assertIn('model = "later"', result)
@@ -117,22 +117,22 @@ values = [
 [projects.'contains # [brackets]']
 description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         self.write(original)
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         if config.tomllib:
             parsed = config.tomllib.loads(self.read())
             self.assertEqual(parsed['model_provider'], config.PROVIDER)
             self.assertIn('fake', parsed['notes'])
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
         self.assertEqual(original, self.read())
 
     def test_edited_relay_table_is_not_silently_deleted_and_lock_is_released(self):
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         self.write(self.read().replace('base_url = "http://127.0.0.1:8787"',
                                        'base_url = "http://127.0.0.1:9999"'))
         before = self.path.read_bytes()
         for action in ('remove', 'check', 'install'):
             with self.assertRaises(ValueError):
-                config.apply(action, self.path)
+                config.apply_legacy(action, self.path)
             self.assertEqual(before, self.path.read_bytes())
             self.assertFalse(self.lock.exists(), 'the lock was not released after %s' % action)
 
@@ -141,13 +141,13 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
                          '[model_providers.openai-retry.headers]\nx = "y"\n'):
             self.write(original)
             with self.assertRaises(ValueError):
-                config.apply('install', self.path)
+                config.apply_legacy('install', self.path)
             self.assertEqual(original, self.read())
             self.assertFalse(self.lock.exists())
 
     def test_exact_manual_snippet_can_be_removed_without_saved_state(self):
         self.write(config.ROOT + '\nmodel = "keep"\n\n' + config.BLOCK)
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
         self.assertIn('model = "keep"', self.read())
         self.assertNotIn(config.PROVIDER, self.read())
 
@@ -156,43 +156,43 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         # is not always 8787. Removal has to recognise it anyway.
         original = config.ROOT + '\nmodel = "keep"\n\n' + config.block_for(9001)
         self.write(original)
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
         self.assertIn('model = "keep"', self.read())
         self.assertNotIn(config.PROVIDER, self.read())
 
     def test_install_adopts_existing_manual_defaults_instead_of_restoring_dead_route(self):
         self.write(config.ROOT + '\nmodel = "keep"\n\n' + config.BLOCK)
-        config.apply('install', self.path)
-        config.apply('remove', self.path)
+        config.apply_legacy('install', self.path)
+        config.apply_legacy('remove', self.path)
         self.assertIn('model = "keep"', self.read())
         self.assertNotIn(config.PROVIDER, self.read())
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
 
     def test_port_is_parameterised(self):
         self.write('model = "keep"\n')
-        config.apply('install', self.path, 9001)
+        config.apply_legacy('install', self.path, 9001)
         installed = self.read()
         self.assertIn('http://127.0.0.1:9001', installed)
         self.assertNotIn('8787', installed)
-        config.apply('remove', self.path, 9001)
+        config.apply_legacy('remove', self.path, 9001)
         self.assertEqual('model = "keep"\n', self.read())
 
     def test_reinstall_on_a_new_port_rewrites_only_our_entries(self):
         original = 'model = "keep"\n\n[features]\napps = true\n'
         self.write(original)
-        config.apply('install', self.path, 8787)
-        config.apply('install', self.path, 9001)
+        config.apply_legacy('install', self.path, 8787)
+        config.apply_legacy('install', self.path, 9001)
         updated = self.read()
         self.assertIn('http://127.0.0.1:9001', updated)
         self.assertNotIn('8787', updated)
         self.assertEqual(1, updated.count(config.ROOT))
-        config.apply('remove', self.path, 9001)
+        config.apply_legacy('remove', self.path, 9001)
         self.assertEqual(original, self.read())
 
     def test_manual_table_on_another_port_is_refused_with_the_port_named(self):
         self.write(config.ROOT + '\n\n' + config.block_for(9001))
         with self.assertRaises(ValueError) as caught:
-            config.apply('install', self.path, 8787)
+            config.apply_legacy('install', self.path, 8787)
         self.assertIn('9001', str(caught.exception))
 
     def test_root_key_lands_above_the_first_table_not_above_the_file(self):
@@ -200,7 +200,7 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         # it has to be inserted before the first header - but not so high that a
         # leading comment loses the setting it describes.
         self.write('# my settings\nmodel = "gpt-5"\n\n[features]\napps = true\n')
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         installed = self.read()
         self.assertTrue(installed.startswith('# my settings\nmodel = "gpt-5"\n'))
         self.assertLess(installed.index(config.ROOT), installed.index('[features]'))
@@ -213,7 +213,7 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         # A live owner: the lock records this process, which is still running.
         self.lock.write_text('{"pid": %d}' % os.getpid(), encoding='utf-8')
         with self.assertRaises(FileExistsError):
-            config.apply('install', self.path)
+            config.apply_legacy('install', self.path)
         self.assertFalse(self.path.exists())
         self.assertTrue(self.lock.exists())
 
@@ -221,7 +221,7 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         # A crash between create and unlink must not block every later install.
         self.lock.write_text('{"pid": 4294967290}', encoding='utf-8')
         self.write('model = "keep"\n')
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         self.assertIn(config.ROOT, self.read())
         self.assertFalse(self.lock.exists())
 
@@ -230,7 +230,7 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         old = 1_000_000_000  # 2001: long past any plausible run
         os.utime(str(self.lock), (old, old))
         self.write('model = "keep"\n')
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         self.assertIn(config.ROOT, self.read())
         self.assertFalse(self.lock.exists())
 
@@ -241,9 +241,9 @@ description = ''' + "'''\nmodel_provider = 'also fake'\n'''\n"
         # survive the edit in both directions.
         self.write('model = "keep"\n')
         os.chmod(self.path, 0o640)
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         self.assertEqual(0o640, self.path.stat().st_mode & 0o777)
-        config.apply('remove', self.path)
+        config.apply_legacy('remove', self.path)
         self.assertEqual(0o640, self.path.stat().st_mode & 0o777)
 
     def test_cli_check_reports_without_writing(self):
@@ -324,7 +324,7 @@ class WindowsInstallerTests(ConfigFixture):
         self.assertEqual(before, self.path.read_bytes())
 
     def test_uninstall_refuses_a_config_it_cannot_restore_and_keeps_the_relay(self):
-        config.apply('install', self.path)
+        config.apply_legacy('install', self.path)
         self.write(self.read().replace('base_url = "http://127.0.0.1:8787"',
                                        'base_url = "http://127.0.0.1:9999"'))
         before = self.path.read_bytes()
@@ -358,7 +358,7 @@ class WindowsInstallerTests(ConfigFixture):
         env['CODEX_HOME'] = str(self.path.parent)
         state_root = Path(self.temp.name) / 'job' / 'localappdata'
         env['LOCALAPPDATA'] = str(state_root)
-        env['USERPROFILE'] = str(Path(self.temp.name) / 'job' / 'profile 测试')
+        env['USERPROFILE'] = str(Path(self.temp.name) / 'job' / 'profile 娴嬭瘯')
         self.addCleanup(self.kill_relays_under, str(Path(self.temp.name) / 'job'))
 
         proc = subprocess.Popen(

@@ -76,14 +76,13 @@ directly:
 python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-base 1 --backoff-max 8
 ```
 
-Then point a custom provider at `http://127.0.0.1:8787` in `config.toml`, as the README shows.
+Then keep the built-in `openai` provider and set root `openai_base_url = "http://127.0.0.1:8787"` in user config.toml, as the README shows.
 
 ## The installers edit `config.toml` — that is the point, and it is safe by construction
 
 All three installers call `scripts/configure_codex.py` (Python 3.9+, stdlib only) to point Codex at
 the relay, so the user never pastes a snippet. It **splices text by character span** rather than
-round-tripping through a TOML writer: it locates the root `model_provider` statement and the
-`[model_providers.openai-retry]` table, replaces only those, and re-parses the result before writing.
+round-tripping through a TOML writer: it locates the root `model_provider` and `openai_base_url` statements, replaces only those, and re-parses the result before writing.
 Comments, key order, CRLF and a BOM all survive, so install → uninstall is byte-identical.
 
 It **refuses** — writing nothing at all — on anything it does not fully understand: a nested or
@@ -166,3 +165,7 @@ The release notes carry the sha256; publish it only after `checks ok`.
 ## License
 
 MIT. Fork it, vendor it, ship it inside your own tooling — no permission needed.
+
+## Existing OpenAI chats (v1.5.1+)
+
+Default installation keeps built-in `openai` and sets root `openai_base_url`. Custom `openai-retry` causes resume errors for existing OpenAI chats. Do not change chat databases or session metadata. Preserve legacy uninstall and verified migration, including restoration of pre-legacy configuration. WebSocket upgrades to /responses receive local HTTP 426 so Codex can fall back to HTTP/SSE. Never forward a persistent upgrade through the ordinary HTTP reader.

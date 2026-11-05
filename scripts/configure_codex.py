@@ -1,32 +1,12 @@
 #!/usr/bin/env python3
-"""Point Codex at the local relay by editing only this project's TOML entries.
+"""Route the built-in OpenAI provider through a local HTTP/SSE retry relay.
 
-Python 3.9+, standard library only, no dependencies.
-
-The edit is a splice, not a re-serialisation. The root `model_provider`
-statement and the `[model_providers.openai-retry]` table are located by
-character span and replaced in place, so comments, key order, line endings and
-an optional UTF-8 BOM all survive untouched. `install` followed by `remove`
-gives back the file byte for byte.
-
-Three actions:
-
-    check    do everything except write; exits non-zero if install would refuse
-    install  add the provider and select it
-    remove   put back whatever was there before install
-
-Why the care: config.toml is the user's file, not ours. Anything that rewrites
-it through a TOML library reformats the whole document and loses every comment
-the user wrote. Anything that guesses at line numbers breaks the first time a
-different Codex version writes the file. A saved state file next to the config
-records what was there, so removal restores it exactly instead of reconstructing
-it from the current file.
-
-Design credit: the span-splicing approach and this state-file layout come from
-BronyaDev's fork (`c38c18d4`, `c440a855`), which this file is a port of. Changes
-in the port: the port number is a parameter instead of a constant, validation
-runs on Python 3.9/3.10 where `tomllib` does not exist, and a lock left behind
-by a crash is reclaimed instead of blocking every later run.
+Python 3.9+, standard library only. Span edits preserve unrelated TOML,
+comments, BOM and newlines. Default installs select `openai` and set the root
+`openai_base_url`, keeping existing OpenAI chats compatible. Legacy
+`openai-retry` state is migrated in memory before writing the new route.
+Uninstall restores the pre-install configuration. No chat records are edited.
+The legacy editor remains available internally for old backup/removal support.
 """
 
 import argparse
@@ -149,7 +129,7 @@ def statements(text):
         yield start, len(text), text[start:]
 
 
-def locations(text):
+def locations(text, root_key="model_provider"):
     """Return (model_provider span, provider table span, first table header)."""
     root = None
     provider = None
@@ -179,9 +159,9 @@ def locations(text):
             if not match:
                 raise ValueError("Unsupported TOML assignment; config was not changed")
             path = section + key_path(match[1].strip())
-            if path == ['model_provider']:
+            if path == [root_key]:
                 if root is not None:
-                    raise ValueError("Duplicate model_provider")
+                    raise ValueError("Duplicate %s" % root_key)
                 root = (start, end)
             if path[:2] == ['model_providers', PROVIDER] and section != path[:2]:
                 raise ValueError("Inline/dotted relay settings require manual editing")
@@ -404,7 +384,7 @@ def config_lock(path, stale_after=LOCK_STALE_SECONDS):
 
 
 # ----------------------------------------------------------------------- apply
-def apply(action, path, port=DEFAULT_PORT):
+def apply_legacy(action, path, port=DEFAULT_PORT):
     path = path.resolve()
     state_path = path.with_name(path.name + STATE_SUFFIX)
     if action == 'remove' and not path.exists() and not state_path.exists():
@@ -536,6 +516,161 @@ def apply(action, path, port=DEFAULT_PORT):
             print("Pre-install backup: %s" % state['backup'])
         else:
             print("Configuration removed: %s%s" % (path, note))
+
+
+def native_root(port=DEFAULT_PORT):
+    """Keep the identity stored in pre-install OpenAI chats."""
+    return 'model_provider = "openai"\nopenai_base_url = "http://127.0.0.1:%d"\n' % port
+
+
+def native_entries(text):
+    root, _, header = locations(text)
+    url, _, _ = locations(text, 'openai_base_url')
+    return root, url, header
+
+
+def replace_native(text, root, url):
+    root_span, url_span, header = native_entries(text)
+    edits = [(span[0], span[1], value or '')
+             for span, value in ((root_span, root), (url_span, url)) if span]
+    missing = ''.join(value for span, value in ((root_span, root), (url_span, url))
+                      if not span and value)
+    if missing:
+        cut = header if header is not None else len(text)
+        prefix = '' if cut == 0 or text[:cut].endswith('\n') else '\n'
+        edits.append((cut, cut, prefix + missing))
+    # Insertions at a table boundary must happen before replacing an adjacent
+    # preceding statement; reverse spans preserve the original offsets.
+    for start, end, value in sorted(edits, reverse=True):
+        text = text[:start] + value + text[end:]
+    return text
+
+
+def legacy_baseline(text, current, state):
+    """Plan legacy removal in memory, without exposing a dead route on disk."""
+    root, block, _ = locations(text)
+    actual_root, actual_block = piece(text, root), piece(text, block)
+    if state:
+        if (actual_root != state['installed_root']
+                or not same_block(actual_block, state['installed_block'])):
+            raise ValueError('Legacy relay settings changed; reconcile them before upgrading')
+        if not state.get('adopted_manual') and hashlib.sha256(current).hexdigest() == state['installed_hash']:
+            original = Path(state['backup']).read_bytes()
+            if hashlib.sha256(original).hexdigest() != state['original_hash']:
+                raise ValueError('Backup checksum mismatch')
+            return original, state.get('created', False)
+        return encode(replace(text, state['original_root'], state['original_block']), current), state.get('created', False)
+    if relay_selected(actual_root):
+        if not same_block(actual_block, BLOCK, any_port=True):
+            raise ValueError('Untracked legacy relay settings differ from defaults; review them first')
+        return encode(replace(text, None, None), current), False
+    return current, False
+
+
+def apply(action, path, port=DEFAULT_PORT):
+    """Use the built-in OpenAI provider; migrate legacy installs transactionally.
+
+    The legacy editor is retained for removal of v1.5.0 and earlier state.
+    No chat records, authentication files or unrelated TOML are changed.
+    """
+    path = path.resolve()
+    state_path = path.with_name(path.name + STATE_SUFFIX)
+    # Legacy removal remains supported, including the previous manual snippet.
+    state = load_state(state_path, path)
+    manual_native = (not state and path.exists()
+                     and native_entries(decode(read(path)))[1] is not None)
+    if action == 'remove' and (not state or state.get('version') != 2) and not manual_native:
+        return apply_legacy(action, path, port)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with config_lock(path.with_name(path.name + LOCK_SUFFIX)):
+        current = read(path)
+        text = decode(current)
+        validate(text)
+        state = load_state(state_path, path)
+        if action == 'remove' and not state:
+            root, url, _ = native_entries(text)
+            selected, endpoint = piece(text, root), piece(text, url)
+            if not (selected and selected.strip() == 'model_provider = "openai"'
+                    and endpoint and re.fullmatch(
+                        r'openai_base_url = "http://127\.0\.0\.1:\d+"', endpoint.strip())):
+                raise ValueError('Untracked native endpoint differs from the documented snippet; restore it manually')
+            output = encode(replace_native(text, None, None), current)
+            validate(decode(output))
+            atomic_write(path, output)
+            print('Manual relay snippet removed: %s' % path)
+            return
+        if state and state.get('version') == 2:
+            root, url, _ = native_entries(text)
+            if piece(text, url) != state['installed_url']:
+                raise ValueError('Managed openai_base_url changed; reconcile it before continuing')
+            if action == 'remove':
+                selected = piece(text, root)
+                updated = replace_native(text, state['original_root'] if selected == state['installed_root'] else selected,
+                                         state['original_url'])
+                output = encode(updated, current)
+                if hashlib.sha256(current).hexdigest() == state['installed_hash']:
+                    output = Path(state['backup']).read_bytes()
+                    if hashlib.sha256(output).hexdigest() != state['original_hash']:
+                        raise ValueError('Backup checksum mismatch')
+                validate(decode(output))
+                if read(path) != current:
+                    raise ValueError('Config changed during this operation')
+                if state['created'] and not output.strip():
+                    path.unlink()
+                else:
+                    atomic_write(path, output)
+                state_path.unlink()
+                print('Configuration removed: %s' % path)
+                return
+            if piece(text, root) != state['installed_root']:
+                raise ValueError('Provider selection changed; remove or reconcile settings first')
+            baseline = None
+        else:
+            baseline, legacy_created = legacy_baseline(text, current, state)
+            created = state.get('created', False) if state else not path.exists()
+            created = created or legacy_created
+            baseline_text = decode(baseline)
+            validate(baseline_text)
+            root, url, _ = native_entries(baseline_text)
+            # Adopt our documented manual snippet like the legacy editor did:
+            # removal must not restore a local endpoint after stopping its relay.
+            endpoint = piece(baseline_text, url)
+            selected = piece(baseline_text, root)
+            manual = re.fullmatch(r'openai_base_url = "http://127\.0\.0\.1:(\d+)"',
+                                  endpoint.strip()) if endpoint else None
+            if not state and manual and selected and selected.strip() == 'model_provider = "openai"':
+                if int(manual[1]) != port:
+                    raise ValueError('Manual endpoint uses port %s; re-run with that port or restore it first' % manual[1])
+                baseline_text = replace_native(baseline_text, None, None)
+                baseline = encode(baseline_text, baseline)
+                root, url, _ = native_entries(baseline_text)
+            original_root, original_url = piece(baseline_text, root), piece(baseline_text, url)
+            text = baseline_text
+        newline = '\r\n' if '\r\n' in text else '\n'
+        installed_root = 'model_provider = "openai"' + newline
+        installed_url = 'openai_base_url = "http://127.0.0.1:%d"' % port + newline
+        updated = replace_native(text, installed_root, installed_url)
+        mode = validate(updated)
+        if action == 'check':
+            print('Configuration preflight passed: %s' % path)
+            return
+        output = encode(updated, baseline if baseline is not None else current)
+        if baseline is not None:
+            backup = path.with_name(path.name + '.overload-fix.' + uuid.uuid4().hex + '.bak')
+            atomic_write(backup, baseline)
+            state = dict(version=2, config_path=str(path), backup=str(backup), created=created,
+                         original_root=original_root, original_url=original_url,
+                         original_hash=hashlib.sha256(baseline).hexdigest())
+        state = dict(state, installed_root=installed_root, installed_url=installed_url,
+                     installed_hash=hashlib.sha256(output).hexdigest())
+        if read(path) != current:
+            raise ValueError('Config changed during this operation; nothing was overwritten')
+        atomic_write(state_path, json.dumps(state, ensure_ascii=False, indent=2).encode('utf-8'))
+        if current != output:
+            atomic_write(path, output)
+        print('Configuration installed: %s (built-in openai; existing OpenAI chats retained)%s' %
+              (path, ' (structural validation only)' if mode == 'structural' else ''))
+        print('Pre-install backup: %s' % state['backup'])
 
 
 def default_path():

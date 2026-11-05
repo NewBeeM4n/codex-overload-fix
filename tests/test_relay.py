@@ -104,6 +104,16 @@ class RelayTests(unittest.TestCase):
         status, _, body = self.request()
         self.assertEqual((status, body, MockUpstream.calls), (200, ok, 2))
 
+    def test_websocket_upgrade_declined_locally_for_http_fallback(self):
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
+        conn.request('GET', '/responses', headers={'Connection': 'Upgrade', 'Upgrade': 'websocket',
+                                                  'Authorization': 'Bearer synthetic-local-only'})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 426)
+        self.assertIn(b'HTTP/SSE', response.read())
+        conn.close()
+        self.assertEqual(MockUpstream.calls, 0)
+
     def test_exhausted_429_preserves_status_headers_and_body(self):
         MockUpstream.retry_delay = '17'
         MockUpstream.queued = [(429, 'application/json', b'{"error":"rate limited"}')]

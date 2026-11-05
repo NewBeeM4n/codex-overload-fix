@@ -263,15 +263,8 @@ if ($manual) {
     Write-Host "Add this to $configPath" -ForegroundColor Cyan
     Write-Host "----------------------------------------" -ForegroundColor DarkGray
     $snippet = @"
-model_provider = "openai-retry"
-
-[model_providers.openai-retry]
-name = "OpenAI (retry)"
-base_url = "http://127.0.0.1:$Port"
-wire_api = "responses"
-requires_openai_auth = true
-stream_max_retries = 20
-request_max_retries = 10
+model_provider = "openai"
+openai_base_url = "http://127.0.0.1:$Port"
 "@
     Write-Host $snippet -ForegroundColor White
     Write-Host "----------------------------------------" -ForegroundColor DarkGray

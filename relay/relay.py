@@ -420,6 +420,14 @@ class Handler(BaseHTTPRequestHandler):
         # A nonce signed by the installer's local key proves a listener knows
         # that key without sending the key or any Codex credentials to it.
         parsed = urlsplit(self.path)
+        if (self.command == "GET" and parsed.path.rstrip("/").endswith("/responses")
+                and self.headers.get("Upgrade", "").lower() == "websocket"):
+            # Built-in openai tries WebSocket first. Explicitly decline the
+            # upgrade so Codex falls back to HTTP/SSE; never proxy credentials
+            # or attempt to buffer a persistent WebSocket as an HTTP response.
+            self._send_simple(426, {"Content-Type": "text/plain"},
+                              b"relay: WebSocket unavailable; use HTTP/SSE\n")
+            return
         if self.command == "GET" and parsed.path == "/__codex_overload_health":
             nonce = parse_qs(parsed.query).get("nonce", [""])[0]
             if ARGS.identity_key and len(nonce) == 64 and all(c in "0123456789abcdef" for c in nonce):

@@ -8,7 +8,7 @@
 
 <p align="center"><sub>Local only &nbsp; / &nbsp; Python 3.9+ &nbsp; / &nbsp; Windows · macOS · Linux &nbsp; / &nbsp; MIT</sub></p>
 
-<p align="center"><a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/latest"><strong>Download latest release</strong></a> &nbsp; · &nbsp; <a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/download/v1.5.0/codex-overload-fix-skill-1.5.0.zip">Download Skill bundle</a></p>
+<p align="center"><a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/latest"><strong>Download latest release</strong></a> &nbsp; · &nbsp; <a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/download/v1.5.1/codex-overload-fix-skill-1.5.1.zip">Download Skill bundle</a></p>
 
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#use-through-a-skill">Install as a Skill</a> · <a href="#optional-local-dashboard">Dashboard</a> · <a href="#contributors">Contributors</a></p>
 
@@ -61,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 The installer will:
 
 1. Locate Python (3.9+; stdlib only, no dependencies).
-2. Check `config.toml` before it changes anything. If the file holds something it cannot safely edit — a `[model_providers.openai-retry]` table it did not write, a nested table, TOML it cannot parse — it says so and installs nothing.
+2. Check `config.toml` before it changes anything. If the file holds something it cannot safely edit — managed endpoint or legacy relay settings it cannot safely reconcile, a nested table, TOML it cannot parse — it says so and installs nothing.
 3. Register a hidden launcher and a watchdog in `HKCU\...\Run` — no admin rights, no console window.
 4. Point Codex at the relay by editing only this project's two entries in `config.toml`. The pre-install file is backed up, and `uninstall.ps1` puts it back byte for byte.
 
@@ -138,6 +138,30 @@ Two Linux-specific notes:
 <details>
 <summary><strong>Configuration, uninstall, proxy and manual startup</strong></summary>
 
+### Upgrade to v1.5.1 — restore existing OpenAI chats
+
+Download and extract the **new release**, open a terminal in its project directory, then run the matching pair below. Skill users run these from the new bundle's `runtime/` directory. Run the uninstall step **before replacing or deleting the old installation directory**, since its service still depends on that path. Do not use `--purge` / `-Purge` when upgrading.
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\uninstall.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+```bash
+# macOS
+bash scripts/uninstall-mac.sh
+bash scripts/install-mac.sh
+
+# Linux
+bash scripts/uninstall-linux.sh
+bash scripts/install-linux.sh
+```
+
+Wait for uninstall to succeed before installing. Reuse any custom proxy, port, CODEX_HOME, state directory or Linux linger setting; on Windows pass the old custom `-StateDir` to uninstall and the desired `-StateDir` to install. Then **fully quit and reopen Codex**, and resume your original OpenAI chat. No chat deletion or sign-in reset is needed. The old `(retry)` label should disappear because the provider is now built-in `openai`; the local relay still handles requests.
+
+If preflight refuses, keep the backup and resolve the reported configuration difference rather than deleting state files. Manual installs must restore their previous provider selection and remove the old `openai-retry` table before applying the new root settings below. Chats created under `openai-retry` itself still require that provider identity; this release does not rewrite their records.
+
 ### All platforms, then
 
 Once the relay is verified as ready, the installers do this for you. With `--no-autostart` or without a usable user service manager, Linux/macOS leave the config unchanged until you start the relay and run the installer again. Each installer edits `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml` if that variable is set) and touches only the two entries below, so comments, key order and every unrelated setting survive untouched. It refuses rather than guesses: if the file holds something it does not fully understand, it prints why and installs nothing.
@@ -145,20 +169,15 @@ Once the relay is verified as ready, the installers do this for you. With `--no-
 If you passed `--no-config` / `-NoConfig`, or the installer could not edit the file safely and printed the snippet instead, add this by hand:
 
 ```toml
-model_provider = "openai-retry"
-
-[model_providers.openai-retry]
-name = "OpenAI (retry)"
-base_url = "http://127.0.0.1:8787"
-wire_api = "responses"
-requires_openai_auth = true      # reuses your existing ChatGPT OAuth — no re-login
-stream_max_retries = 20
-request_max_retries = 10
+model_provider = "openai"
+openai_base_url = "http://127.0.0.1:8787"
 ```
 
 Restart Codex. You can confirm the shim is in the path by checking that `127.0.0.1:8787` has established connections while a turn is running.
 
-> `openai` is a reserved provider id and cannot be overridden. That is why this defines a new one.
+> Since v1.5.1, installation keeps built-in `openai` and changes its endpoint using the officially supported [`openai_base_url`](https://learn.chatgpt.com/docs/config-file/config-advanced). Existing OpenAI chats can resume without the “This chat uses openai, but your current provider is openai-retry” mismatch. WebSocket upgrades are declined locally with HTTP 426 so Codex can fall back to HTTP/SSE. The old `OpenAI (retry)` label was a custom provider name, not an account change; it should disappear after upgrading and fully restarting Codex.
+>
+> Chats previously created under `openai-retry` still belong to that provider. This update preserves original `openai` chats; it does not rewrite chat history or migrate other provider identities.
 
 ### Undo
 
@@ -170,7 +189,7 @@ Nothing is permanent, and the relay is stopped the same way on every platform:
 
 The uninstallers restore `config.toml` from the backup taken at install, byte for byte, so you do not have to remove anything by hand. They restore it *before* stopping the relay, and refuse to stop anything if the file no longer matches what was written — a relay stopped with Codex still pointed at it is worse than one left running. If Python or the configuration editor is missing, uninstall stops without disabling the relay. Restart Codex afterwards.
 
-If you installed with `--no-config` / `-NoConfig`, remove the `model_provider` line and the `[model_providers.openai-retry]` block yourself.
+For manual configuration, restore your previous `model_provider` and `openai_base_url` values; remove the URL override if it did not exist. For pre-v1.5.1 manual installs, restore provider selection and remove the `openai-retry` table. Restore configuration before stopping the relay.
 
 ### Windows: why the installer uses wscript, not `-WindowStyle Hidden`
 
@@ -216,7 +235,7 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 ## Use through a Skill
 
-Download the free MIT-licensed `codex-overload-fix-skill-1.5.0.zip` from [v1.5.0](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.0). It includes the Skill and complete runtime; no separate clone is needed.
+Download the free MIT-licensed `codex-overload-fix-skill-1.5.1.zip` from [v1.5.1](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.1). It includes the Skill and complete runtime; no separate clone is needed.
 
 1. Extract the ZIP and keep the entire `codex-overload-fix` folder, including `runtime/`.
 2. Install the folder with your agent's local Skill installation mechanism. For clients supporting project skills in `.agents/skills`, place it at `.agents/skills/codex-overload-fix/`. Other clients may use different paths; follow their current documentation and refresh the agent.
@@ -225,7 +244,7 @@ Download the free MIT-licensed `codex-overload-fix-skill-1.5.0.zip` from [v1.5.0
 
 Installing the Skill makes instructions and runtime files available; it does not start a service or modify Codex configuration. Execution requires a local agent, Python 3.9+, and authorization to install. Other agents can help configure Codex; loading this Skill does not reroute their own model traffic. A cloud-only chat cannot install a service on your computer.
 
-Source: [SKILL.md](skills/codex-overload-fix/SKILL.md). Distribute the complete ZIP, not SKILL.md alone. Keep its installed location stable while the relay uses it; uninstall the relay before moving or deleting the Skill. Build with `python tools/make_skill_release.py v1.5.0 --out codex-overload-fix-skill-1.5.0.zip`. See the [official Skill documentation](https://developers.openai.com/codex/skills) for client-specific discovery rules.
+Source: [SKILL.md](skills/codex-overload-fix/SKILL.md). Distribute the complete ZIP, not SKILL.md alone. Keep its installed location stable while the relay uses it; uninstall the relay before moving or deleting the Skill. Build with `python tools/make_skill_release.py v1.5.1 --out codex-overload-fix-skill-1.5.1.zip`. See the [official Skill documentation](https://developers.openai.com/codex/skills) for client-specific discovery rules.
 
 <br>
 
@@ -259,10 +278,10 @@ Everything else is byte-transparent: request bodies (including zstd-compressed o
 
 - **It does not touch your credentials.** Requests are forwarded with the headers Codex already sent, including your OAuth token. The shim never stores, logs or transmits them anywhere else.
 - **It does not modify request bodies.** Byte-for-byte passthrough. Relay logs record event types and request-size statistics, not event payloads; logs from older versions may contain response fragments.
-- **It does not bypass a limit.** It retries a request that the server declined to serve. It uses the same public custom-provider mechanism that people use to point Codex at Ollama or LM Studio.
+- **It does not bypass a limit.** It retries a request that the server declined to serve. It uses the official built-in provider endpoint override, preserving the `openai` identity.
 - **It is local, and it is not a relay service.** This is a Python process on `127.0.0.1` that forwards to the official endpoint. There is no third-party server, no shared account pool, no middleman that sees your token — the opposite of the mirror/shared-account services people usually mean by "reverse proxy". Delete one line from `config.toml` and you are back to direct connections.
 - **It retries before committing output to the client.** After a stream is committed, later events and errors are forwarded without a relay retry; the client decides how to recover.
-- **The one file it edits is `config.toml`, and only two entries in it.** `scripts/configure_codex.py` finds the existing `model_provider` statement and the `[model_providers.openai-retry]` table by span and splices text, so comments, ordering, line endings and a BOM all survive; it writes only after the result parses. It refuses anything it does not fully understand — a nested table, a hand-edited relay block, a file it cannot read — and writes nothing in that case. Install→uninstall is byte-identical, including the case where there was no `config.toml` before install. That is checked by `tests/test_configure_codex.py` and by all three platform workflows.
+- **The one file it edits is `config.toml`, and only two entries in it.** `scripts/configure_codex.py` finds the root `model_provider` and `openai_base_url` settings by span and splices text, so comments, ordering, line endings and a BOM all survive; it writes only after the result parses. It refuses anything it does not fully understand — a nested table, a hand-edited relay block, a file it cannot read — and writes nothing in that case. Install→uninstall is byte-identical, including the case where there was no `config.toml` before install. That is checked by `tests/test_configure_codex.py` and by all three platform workflows.
 - **On account risk:** I can't promise zero, since any client that changes request timing is outside the default behaviour. What it does *not* do is share credentials, impersonate the client, bypass quota, or reverse-engineer the protocol. It re-sends a request the server already declined — the same action as clicking retry, just before the error reaches you. If you want to be conservative, lower `--max-attempts` to 10 and widen the backoff.
 
 What it *cannot* fix: a genuinely exhausted quota, an expired login, or a broken network — those are different errors and are passed through unchanged. Nor is it a fix for **a degraded model**: if the model itself has started answering worse than it used to, nothing here changes that. It stops the capacity error from interrupting you; it cannot make the model smarter. See [Limitations](#limitations).

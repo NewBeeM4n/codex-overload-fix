@@ -8,7 +8,7 @@
 
 <p align="center"><sub>本地运行 &nbsp; / &nbsp; Python 3.9+ &nbsp; / &nbsp; Windows · macOS · Linux &nbsp; / &nbsp; MIT</sub></p>
 
-<p align="center"><a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/latest"><strong>下载最新版本</strong></a> &nbsp; · &nbsp; <a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/download/v1.5.0/codex-overload-fix-skill-1.5.0.zip">下载 Skill 包</a></p>
+<p align="center"><a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/latest"><strong>下载最新版本</strong></a> &nbsp; · &nbsp; <a href="https://github.com/NewBeeM4n/codex-overload-fix/releases/download/v1.5.1/codex-overload-fix-skill-1.5.1.zip">下载 Skill 包</a></p>
 
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="#通过-skill-调用">Skill 安装</a> · <a href="#可选的本地可视化面板">可视化面板</a> · <a href="#贡献者">贡献者</a></p>
 
@@ -138,6 +138,30 @@ bash scripts/uninstall-linux.sh                # 卸载，加 --purge 连日志�
 <details>
 <summary><strong>配置、卸载、代理与手动启动</strong></summary>
 
+### 升级到 v1.5.1：恢复原有 OpenAI 聊天
+
+下载并解压**新版发布包**，在新版项目目录打开终端，执行对应平台的两条命令。Skill 用户从新版包的 `runtime/` 目录执行。**先卸载，再替换或删除旧安装目录**，因为旧服务仍依赖原路径。升级时不要使用 `--purge` / `-Purge`。
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\uninstall.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+```bash
+# macOS
+bash scripts/uninstall-mac.sh
+bash scripts/install-mac.sh
+
+# Linux
+bash scripts/uninstall-linux.sh
+bash scripts/install-linux.sh
+```
+
+卸载成功后再安装。沿用原先的代理、端口、CODEX_HOME、自定义状态目录或 Linux linger 设置；Windows 使用过自定义 `-StateDir` 的，卸载时传入旧目录，安装时传入希望继续使用的目录。完成后**彻底退出并重新打开 Codex**，再继续原有 OpenAI 聊天。无需删除聊天或重新登录。原先的 `(retry)` 标识应不再显示，因为现在使用内置 `openai`，但请求依然经过本地中继。
+
+如果配置预检拒绝，请保留备份并解决提示中的配置差异，不要删除状态文件强行安装。手动安装的用户先恢复原先的 provider 选择、移除旧的 `openai-retry` 表，再应用下面的根级配置。曾经在 `openai-retry` 下创建的聊天仍需要该 provider 身份，本次不会修改它们的记录。
+
 ### 三个平台都一样，然后
 
 确认中继已经就绪后，安装脚本会替你做这一步。Linux/macOS 使用 `--no-autostart` 或用户服务管理器不可用时，配置会保持不变；先启动中继，再重新运行安装脚本。它改的是 `~/.codex/config.toml`（Windows 上是 `%USERPROFILE%\.codex\config.toml`；设了 `$CODEX_HOME` 就是 `$CODEX_HOME/config.toml`），而且只碰下面这两处，所以注释、键的顺序和其他所有设置都原样保留。它不会猜：文件里有它完全不理解的内容时，它会说明原因，然后什么都不装。
@@ -145,20 +169,15 @@ bash scripts/uninstall-linux.sh                # 卸载，加 --purge 连日志�
 如果你之前加了 `--no-config` / `-NoConfig`，或者安装器判断无法安全改写、打印了片段，就手动加上这一段：
 
 ```toml
-model_provider = "openai-retry"
-
-[model_providers.openai-retry]
-name = "OpenAI (retry)"
-base_url = "http://127.0.0.1:8787"
-wire_api = "responses"
-requires_openai_auth = true      # 复用现有 ChatGPT OAuth，不用重新登录
-stream_max_retries = 20
-request_max_retries = 10
+model_provider = "openai"
+openai_base_url = "http://127.0.0.1:8787"
 ```
 
 重启 Codex。跑一个回合时看 `127.0.0.1:8787` 有没有 ESTABLISHED 连接，就能确认中继在工作。
 
-> `openai` 是保留 provider id，不能被覆盖，所以这里定义了一个新的。
+> 从 v1.5.1 起，默认保留内置 `openai`，通过官方支持的 [`openai_base_url`](https://learn.chatgpt.com/docs/config-file/config-advanced) 修改请求地址，避免继续原有 OpenAI 聊天时出现 “This chat uses openai, but your current provider is openai-retry”。WebSocket 升级会在本地收到 HTTP 426，让客户端改用 HTTP/SSE。旧版的 `OpenAI (retry)` 是自定义 provider 名称，不是账户变更；升级并完全重启 Codex 后应不再显示。
+>
+> 曾经在 `openai-retry` 下创建的聊天仍属于该 provider。本次兼容的是原先的 `openai` 聊天，不会修改聊天记录或强行迁移其他 provider 的聊天身份。
 
 ### 卸载
 
@@ -170,7 +189,7 @@ request_max_retries = 10
 
 卸载脚本会用安装时留下的备份把 `config.toml` 逐字节恢复，你不用再手动删任何东西。它**先恢复配置，再停中继**；如果文件已经和当初写入的内容对不上，它会拒绝停任何东西——中继停了而 Codex 还指着一个死端口，比让它继续跑更糟。如果缺少 Python 或配置编辑器，卸载会停止并保留中继。之后重启 Codex。
 
-如果你是从 `--no-config` / `-NoConfig` 装的，那就自己删掉 `model_provider` 那行和 `[model_providers.openai-retry]` 整块。
+手动配置的用户请恢复原先的 `model_provider` 和 `openai_base_url`；原来没有地址覆盖就删除该项。v1.5.1 之前的手动安装则恢复 provider 选择并移除 `openai-retry` 表。先恢复配置，再停止中继。
 
 ### Windows：安装脚本为什么用 wscript，而不是 `-WindowStyle Hidden`
 
@@ -216,7 +235,7 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 ## 通过 Skill 调用
 
-下载 [v1.5.0 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.0) 中免费、MIT 开源的 `codex-overload-fix-skill-1.5.0.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
+下载 [v1.5.1 Release](https://github.com/NewBeeM4n/codex-overload-fix/releases/tag/v1.5.1) 中免费、MIT 开源的 `codex-overload-fix-skill-1.5.1.zip`。包内包含 Skill 和完整运行文件，无需另行克隆仓库。
 
 1. 解压 ZIP，保留整个 `codex-overload-fix` 文件夹，包括 `runtime/`。
 2. 按所用 Agent 的本地 Skill 安装方式安装。对于支持项目 `.agents/skills` 目录的客户端，放到 `.agents/skills/codex-overload-fix/`；其他客户端可能使用不同位置，请遵循其当前文档，必要时刷新或重启 Agent。
@@ -225,7 +244,7 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 安装 Skill 只会提供指令和运行文件，不会自动启动服务或修改配置。执行需要本地 Agent、Python 3.9+ 和安装授权。其他 Agent 可以帮助配置 Codex，但加载此 Skill 不会改变其他 Agent 自身的模型请求路径；纯云端聊天无法在你的电脑上安装服务。
 
-源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.5.0 --out codex-overload-fix-skill-1.5.0.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
+源码入口：[SKILL.md](skills/codex-overload-fix/SKILL.md)。分发时请使用完整 ZIP，不要只复制 SKILL.md。中继依赖安装位置，移动或删除 Skill 前请先卸载中继。打包命令：`python tools/make_skill_release.py v1.5.1 --out codex-overload-fix-skill-1.5.1.zip`。客户端发现规则请参照[官方 Skill 文档](https://developers.openai.com/codex/skills)。
 
 <br>
 
@@ -259,10 +278,10 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 - **不碰你的凭证。** 转发时用的就是 Codex 自己发出的头，包括你的 OAuth token。中继不存储、不记录、不发送到任何其他地方。
 - **不修改请求体。** 逐字节转发。中继日志只记录事件类型和请求体积统计，不记录事件原文；旧版本日志可能包含回答片段。
-- **不绕过任何限制。** 它只是重试一个服务端拒绝服务的请求。用的是官方支持的 custom provider 机制——很多人用它把 Codex 指向 Ollama 或 LM Studio。
+- **不绕过任何限制。** 它只是重试一个服务端拒绝服务的请求。使用官方支持的内置 provider 地址覆盖设置，保留 `openai` 身份。
 - **它是本地的，而且它不是「反代」。** 这是 `127.0.0.1` 上的一个 Python 进程，直接转发到官方端点。没有第三方服务器、没有共享账号池、没有中间人看得到你的 token —— 和人们通常说的镜像站 / 反代站正好相反。从 `config.toml` 删掉一行就回到直连。
 - **只在输出交给客户端之前重试。** 一旦开始传送，后续事件和错误会交给客户端处理，中继不再自行重试。
-- **它唯一改的文件是 `config.toml`，而且只改里面的两处。** `scripts/configure_codex.py` 按字符位置定位已有的 `model_provider` 语句和 `[model_providers.openai-retry]` 表，然后拼接文本，所以注释、顺序、换行符和 BOM 都原样保留；只有改完的内容能通过解析，它才落盘。遇到它不完全理解的内容——嵌套表、被手改过的中继块、读不了的文件——它直接拒绝，并且一个字节都不写。安装→卸载前后逐字节相同，包括「安装前根本没有 `config.toml`」这种情况。这一点由 `tests/test_configure_codex.py` 和三个平台的工作流逐次验证。
+- **它唯一改的文件是 `config.toml`，而且只改里面的两处。** `scripts/configure_codex.py` 按字符位置定位已有的根级 `model_provider` 和 `openai_base_url` 语句，然后拼接文本，所以注释、顺序、换行符和 BOM 都原样保留；只有改完的内容能通过解析，它才落盘。遇到它不完全理解的内容——嵌套表、被手改过的中继块、读不了的文件——它直接拒绝，并且一个字节都不写。安装→卸载前后逐字节相同，包括「安装前根本没有 `config.toml`」这种情况。这一点由 `tests/test_configure_codex.py` 和三个平台的工作流逐次验证。
 - **关于封号风险：** 我不能保证为零 —— 任何改变了请求时序的客户端都不属于默认行为。但它**没有**做共享凭证、伪造客户端、绕过额度、逆向协议这几件事。它重发的请求，服务端此前已经明确拒绝过，本质和你手动点重试是同一个动作，只是发生在错误弹到你面前之前。想更保守可以把 `--max-attempts` 调到 10，并把退避拉长。
 
 它**治不了**：额度真正用尽、登录过期、网络不通 —— 那些是不同的错误，会原样透传。它也**不是模型降智的解药**：如果模型本身答得不如以前了，这里没有任何东西能改变它。它只负责让满载报错不再打断你，不能让模型变聪明。详见[局限](#局限)。

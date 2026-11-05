@@ -31,7 +31,7 @@ For an existing relay, inspect its local listener and log statistics. Logs from 
 
 ## Install or remove
 
-Installing the skill itself does not install the background relay. Before changing configuration or registering startup, explain that the relay forwards Codex's existing authentication headers to the official endpoint and that installation edits the provider selection in config.toml. Obtain authorization for these changes unless the user has already requested installation or removal.
+Installing the skill itself does not install the background relay. Before changing configuration or registering startup, explain that the relay forwards Codex's existing authentication headers to the official endpoint and that installation keeps built-in openai and sets root openai_base_url in config.toml. Obtain authorization for these changes unless the user has already requested installation or removal.
 
 Use Python 3.9+ and the bundled platform installer, running from the runtime root:
 
@@ -45,7 +45,7 @@ Use the corresponding `uninstall.ps1`, `uninstall-mac.sh`, or `uninstall-linux.s
 
 ## Verify and report
 
-Require the installer's signed readiness verification before declaring installation successful. For Unix --no-autostart or unavailable service managers, the config may remain unchanged: report the remaining startup step. Ask the user to fully restart Codex after a provider change. If the active client cannot configure a custom Responses provider, explain that limitation instead of claiming the relay was connected.
+Require the installer's signed readiness verification before declaring installation successful. For Unix --no-autostart or unavailable service managers, the config may remain unchanged: report the remaining startup step. Ask the user to fully restart Codex after configuration changes. v1.5.1+ uses built-in `openai` plus root `openai_base_url` to preserve existing OpenAI chats. Older installs selected `openai-retry` (displayed as `OpenAI (retry)`); migrate using the bundled scripts and README upgrade procedure. Provider-mismatch resume errors happen before inference and are not fixed by increasing retries. Do not edit session files or databases to change provider IDs. Chats created under `openai-retry` still require that identity; do not promise all provider histories are migrated. If the client does not honor `openai_base_url` or cannot fall back from WebSocket to HTTP/SSE, report the limitation instead of claiming the relay was connected.
 
 Summarize the operation, config backup, startup mechanism, verification, and undo command in the user's language. Do not claim a successful live model request unless it was actually tested. The relay retries only before committing output; failures after commit belong to the client.
 

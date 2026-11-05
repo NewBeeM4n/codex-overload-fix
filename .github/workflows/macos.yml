@@ -60,8 +60,8 @@ jobs:
 
           python3 scripts/configure_codex.py check --port 8787
           python3 scripts/configure_codex.py install --port 8787
-          grep -q '^model_provider = "openai-retry"$' "$CODEX_HOME/config.toml"
-          grep -q 'model_providers.openai-retry' "$CODEX_HOME/config.toml"
+          grep -q '^model_provider = "openai"$' "$CODEX_HOME/config.toml"
+          ! grep -q 'model_providers.openai-retry' "$CODEX_HOME/config.toml"
           grep -q 'base_url = "http://127.0.0.1:8787"' "$CODEX_HOME/config.toml"
           # Byte-identical, not merely equivalent: the user's comments, key
           # order and blank lines have to come back exactly as they were.
