@@ -392,6 +392,63 @@ class WindowsInstallerTests(ConfigFixture):
             s.bind(('127.0.0.1', 0))
             return s.getsockname()[1]
 
+    def test_install_selects_a_python_under_a_non_ascii_directory(self):
+        # Guards the decoding bug in the Python discovery block: Windows
+        # PowerShell 5.1 decodes a native command's stdout with the ANSI code
+        # page, Python encodes it with the locale's preferred encoding, and a
+        # path that does not round-trip comes back mangled, so Test-Path fails
+        # and the installer reports "No usable Python 3.9+ found".
+        #
+        # The bug only bites when the interpreter's own path is not ASCII.
+        # Pointing CODEX_HOME at a non-ASCII directory is not enough: PATH is
+        # seeded from the interpreter that runs the tests, so discovery would
+        # still find the ASCII CI interpreter and the test would pass against
+        # the broken implementation.
+        #
+        # A directory junction therefore puts a real, working interpreter under
+        # a non-ASCII path without copying the installation or needing admin
+        # rights, and PATH is narrowed to that directory alone so discovery has
+        # to select it. The assertion reads the generated launcher, which is
+        # written as UTF-16 and so survives the same encoding problem the test
+        # is about.
+        if not HAVE_WIN32:
+            self.skipTest('Windows installers')
+        real_dir = Path(sys.executable).parent
+        link_root = Path(self.temp.name) / 'profile \u6d4b\u8bd5'
+        junction = link_root / real_dir.name
+        link_root.mkdir(parents=True)
+        made = subprocess.run(['cmd', '/c', 'mklink', '/J', str(junction), str(real_dir)],
+                              capture_output=True, text=True)
+        if made.returncode != 0:
+            self.skipTest('cannot create a directory junction here: %s' % made.stdout)
+        self.addCleanup(self.kill_relays_under, str(Path(self.temp.name)))
+
+        env = os.environ.copy()
+        # System32 keeps `powershell` and `cmd` resolvable. The interpreter's own
+        # directory is deliberately absent: `py -3` is tried before `python` and
+        # would resolve to the ASCII interpreter, hiding the regression.
+        env['PATH'] = os.pathsep.join([str(junction),
+                                       r'C:\Windows\System32',
+                                       r'C:\Windows\System32\WindowsPowerShell\v1.0'])
+        env['CODEX_HOME'] = str(link_root)
+        env['LOCALAPPDATA'] = str(Path(self.temp.name) / 'localappdata')
+        env['USERPROFILE'] = str(link_root)
+        env.pop('PYTHONIOENCODING', None)  # the fix must not depend on an env var
+
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+             '-File', str(ROOT / 'scripts' / 'install.ps1'),
+             '-NoConfig', '-NoAutostart', '-Port', str(self.free_port())],
+            env=env, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace', timeout=180)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertNotIn('No usable Python', result.stdout)
+
+        launcher = link_root / '.codex-overload-fix' / 'start-relay.vbs'
+        self.assertTrue(launcher.exists(), 'no launcher was written: %s' % result.stdout)
+        self.assertIn(str(junction), launcher.read_text(encoding='utf-16'),
+                      'discovery did not select the interpreter under the non-ASCII path')
+
     @staticmethod
     def close_handle_once(k32, holder):
         if holder[0]:
