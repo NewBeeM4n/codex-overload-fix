@@ -495,6 +495,7 @@ enabled = false
 <a href="https://github.com/JSVan32"><img src="https://avatars.githubusercontent.com/u/275063765?v=4&s=96" width="48" height="48" alt="JSVan32"></a>&nbsp;
 <a href="https://github.com/BronyaDev"><img src="https://avatars.githubusercontent.com/u/33083096?v=4&s=96" width="48" height="48" alt="BronyaDev"></a>&nbsp;
 <a href="https://github.com/ZenAlexa"><img src="https://avatars.githubusercontent.com/u/125807850?v=4&s=96" width="48" height="48" alt="ZenAlexa"></a>&nbsp;
+<a href="https://github.com/QiqiangLi"><img src="https://github.com/QiqiangLi.png?size=96" width="48" height="48" alt="QiqiangLi"></a>&nbsp;
 <a href="https://github.com/jdp22"><img src="https://github.com/jdp22.png?size=96" width="48" height="48" alt="jdp22"></a>&nbsp;
 <a href="https://github.com/lighthouser-agent"><img src="https://github.com/lighthouser-agent.png?size=96" width="48" height="48" alt="lighthouser-agent"></a>&nbsp;
 <a href="https://github.com/yyx0506"><img src="https://github.com/yyx0506.png?size=96" width="48" height="48" alt="yyx0506"></a>&nbsp;
@@ -510,6 +511,7 @@ enabled = false
 | [@JSVan32](https://github.com/JSVan32) | Linux 启动脚本 —— `scripts/install-linux.sh`、`scripts/uninstall-linux.sh` 和 `.github/workflows/linux.yml`，见 [#1](https://github.com/NewBeeM4n/codex-overload-fix/pull/1)。 |
 | [@BronyaDev](https://github.com/BronyaDev) | 三平台安装脚本现在都在用的那份 `config.toml` 安全编辑器：按字符位置拼接的思路、拒绝规则，以及安装/卸载往返测试，来自[他的 fork](https://github.com/BronyaDev/codex-overload-fix)（`c38c18d4`、`c440a855`）。移植进 `scripts/configure_codex.py` 和 `tests/test_configure_codex.py`，设计原样保留；改动之处列在那个文件开头的说明里。 |
 | [@ZenAlexa](https://github.com/ZenAlexa) | [#2](https://github.com/NewBeeM4n/codex-overload-fix/issues/2) 里那份 Windows 启动边界的报告，附了一个自带完整代码的 kill-on-close Job Object 复现脚本。它找出了一个真 bug：安装器用 `Start-Process` 起看门狗，看门狗因此一直是调用者 job 的成员，安装它的宿主一退出中继就跟着死。现在安装器改走 `Win32_Process.Create`，并且会等端口真的起来；起不来就一个字都不动 `config.toml`。这个场景已经固化成了 `tests/test_configure_codex.py` 里的回归测试。 |
+| [@QiqiangLi](https://github.com/QiqiangLi) | 报告并修复了 Windows 安装和卸载脚本无法识别中文等非 ASCII 路径下 Python 的问题，并加入回归测试。 [#4](https://github.com/NewBeeM4n/codex-overload-fix/issues/4), [#5](https://github.com/NewBeeM4n/codex-overload-fix/pull/5). |
 | [@jdp22](https://github.com/jdp22) | [可视化 Fork](https://github.com/jdp22/codex-overload-fix-with-visual)，自 `de979ef5` 起：日志解析和本地活动展示为可选统计面板提供了基础思路；未采用回答内容记录及自定义上游安装功能。 |
 | [@lighthouser-agent](https://github.com/lighthouser-agent) | [Fork 中的流处理](https://github.com/lighthouser-agent/codex-overload-fix/blob/c0b0b9dd/relay/sse.py)：参考其保守输出边界、多行 SSE、取消/超时及 Retry-After 处理，完善官方直连路径；未引入第三方服务适配。 |
 | [@yyx0506](https://github.com/yyx0506) | [Fork](https://github.com/yyx0506/codex-overload-fix)，自 `6165ae54` 起：参考正常 JSON 响应处理和图片输出事件覆盖；未引入账号池及网关功能。 |

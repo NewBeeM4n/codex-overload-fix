@@ -126,7 +126,8 @@ jobs:
           echo "unit argv listens"
           kill "$RELAY_PID" 2>/dev/null || true
           wait "$RELAY_PID" 2>/dev/null || true
-          bash scripts/uninstall-linux.sh --purge
+          # Keep the runner user bus alive for the live systemd check below.
+          bash scripts/uninstall-linux.sh
 
       - name: systemd loads the service
         run: |
