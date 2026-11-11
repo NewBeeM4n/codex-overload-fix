@@ -525,14 +525,9 @@ Contributions of any size are welcome: a bug report, a measurement from your own
 
 ---
 
-## A personal note and a small request for support
+## Contact
 
-Thank you for checking out and using this project. I work at **Zhishu (智枢)**, a platform that relays requests to Chinese AI models using official provider API keys. You are welcome to scan the QR code below to add my colleague on WeChat. **Anyone who adds my colleague on WeChat and sends the invitation code 【overload】 can receive RMB 100 in platform credit.**
-
-This project will remain free and open source. Thank you for supporting the project, and to anyone who chooses to support my work as well. For questions about this project or to share your experience, you can reach me on my personal QQ: **2996804841**. I will do my best to help.
-
-<p align="center"><img src="assets/zhishu-wechat.png" alt="My Zhishu colleague's WeChat QR code; send 【overload】 for RMB 100 in platform credit" width="200"></p>
-<p align="center">Add my colleague on WeChat and send invitation code <strong>【overload】</strong> to receive <strong>RMB 100 in platform credit</strong>.</p>
+For questions about this project or to share your experience, you can reach me on my personal QQ: **2996804841**. I will do my best to help.
 
 <br>
 
