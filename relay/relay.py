@@ -20,6 +20,7 @@ import hmac
 import http.client
 import io
 import json
+import math
 import os
 import random
 import select
@@ -121,7 +122,7 @@ class InterruptibleReader(io.RawIOBase):
         return True
 
     def readinto(self, buffer):
-        deadline = time.monotonic() + self.idle_timeout
+        deadline = time.monotonic() + (self.watch.stream_idle_timeout or self.idle_timeout)
         while True:
             if self.watch.reason:
                 raise OSError(self.watch.reason)
@@ -155,6 +156,7 @@ class ConnectionWatch:
         self.conn, self.cancelled, self.deadline = conn, cancelled, deadline
         self.sock = None
         self.committed = False
+        self.stream_idle_timeout = None
         self.reason = None
         self.lock = threading.Lock()
         self.done = threading.Event()
@@ -280,7 +282,8 @@ def classify_event(payload):
     return "commit", "output event"
 
 
-def attempt(path, headers, body, timeout, commit_by, cancelled=lambda: False):
+def attempt(path, headers, body, timeout, commit_by, cancelled=lambda: False,
+            stream_idle_timeout=None):
     """Preserve response bytes; retry explicit refusals or pre-send connect errors."""
     conn = upstream_connection(min(timeout, max(0.05, commit_by - time.monotonic())))
     watch = ConnectionWatch(conn, cancelled, commit_by)
@@ -313,6 +316,7 @@ def attempt(path, headers, body, timeout, commit_by, cancelled=lambda: False):
             conn._relay_watch = watch
             retained = True
             return "stream", 200, response_headers, b"", conn, resp
+        watch.stream_idle_timeout = stream_idle_timeout
         prelude = bytearray()
         parser = SSEFrames()
         while True:
@@ -336,9 +340,10 @@ def attempt(path, headers, body, timeout, commit_by, cancelled=lambda: False):
                 conn._relay_watch = watch
                 retained = True
                 return "stream", 200, response_headers, bytes(prelude), conn, resp
-    except (OSError, ValueError, http.client.HTTPException):
-        status = 504 if watch.reason == "deadline" or time.monotonic() >= commit_by else 502
-        return "passthrough", status, {"Content-Type": "text/plain"}, b"relay: upstream interrupted; request not replayed\n", None, "transport interrupted"
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        reason = watch.reason or ("upstream idle timeout" if isinstance(exc, TimeoutError) else "transport interrupted")
+        status = 504 if reason in ("deadline", "upstream idle timeout") or time.monotonic() >= commit_by else 502
+        return "passthrough", status, {"Content-Type": "text/plain"}, b"relay: upstream interrupted; request not replayed\n", None, reason
     finally:
         if not retained:
             watch.close()
@@ -468,13 +473,14 @@ class Handler(BaseHTTPRequestHandler):
             mode, status, resp_headers, prelude, conn, resp = attempt(
                 upstream_path, headers, body, ARGS.timeout,
                 min(deadline, time.monotonic() + ARGS.commit_deadline), self._client_gone,
+                stream_idle_timeout=getattr(ARGS, "stream_idle_timeout", None),
             )
             if mode == "stream":
                 log(f"[{cport}] attempt {attempt_no}: ok, streaming")
                 self._stream_back(resp_headers, prelude, conn, resp)
                 return
             if mode == "passthrough":
-                log(f"[{cport}] attempt {attempt_no}: upstream {status}, passthrough")
+                log(f"[{cport}] attempt {attempt_no}: upstream {status}, passthrough ({resp})")
                 self._send_simple(status, resp_headers, prelude)
                 return
             last = (status, resp_headers, prelude)
@@ -526,6 +532,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def _stream_back(self, resp_headers, prelude, conn, resp):
         # Once committed, preserve all bytes and close even if header delivery fails.
+        started = time.monotonic()
+        forwarded = 0
+        outcome = "eof"
+        terminal = "none"
+        parser = SSEFrames()
+        inspect_sse = (any(k.lower() == "content-type" and "text/event-stream" in v.lower()
+                           for k, v in resp_headers.items())
+                       and not any(k.lower() == "content-encoding" and v.lower() not in ("", "identity")
+                                   for k, v in resp_headers.items()))
+
+        def observe(chunk):
+            nonlocal terminal, parser
+            if inspect_sse and parser is not None:
+                for payload in parser.feed(chunk):
+                    try:
+                        evt = json.loads(payload)
+                    except (ValueError, TypeError, RecursionError):
+                        continue
+                    kind = evt.get("type") if isinstance(evt, dict) else None
+                    if kind in ("response.completed", "response.failed", "response.incomplete",
+                                "response.error", "error"):
+                        terminal = kind
+                # Diagnostics must not accumulate an unbounded partial event.
+                if len(parser.line) + sum(map(len, parser.data)) > 262144:
+                    parser = None
         try:
             self.send_response(200)
             ctype = next((v for k, v in resp_headers.items() if k.lower() == "content-type"), "text/event-stream")
@@ -539,16 +570,25 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.wfile.write(prelude)
             self.wfile.flush()
+            forwarded += len(prelude)
+            observe(prelude)
             while True:
                 chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
+                forwarded += len(chunk)
+                observe(chunk)
+        except (OSError, http.client.HTTPException) as exc:
+            outcome = "upstream idle timeout" if isinstance(exc, TimeoutError) else "transport interrupted"
         finally:
             watch = getattr(conn, "_relay_watch", None)
+            if watch and watch.reason:
+                outcome = watch.reason
+            cport = getattr(self, "client_address", (None, "?"))[1]
+            log(f"[{cport}] stream ended: {outcome}; terminal={terminal}; "
+                f"forwarded={forwarded}B; elapsed={time.monotonic() - started:.1f}s; not replayed")
             if watch:
                 watch.close()
             if hasattr(resp, 'close'):
@@ -590,6 +630,13 @@ def parse_upstream(value):
     return scheme, host, port, prefix
 
 
+def positive_seconds(value):
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("must be a finite positive number of seconds")
+    return seconds
+
+
 def main():
     global ARGS
     p = argparse.ArgumentParser()
@@ -603,6 +650,9 @@ def main():
     p.add_argument("--commit-deadline", type=float, default=120.0,
                    help="max seconds to hold the stream head while deciding to retry")
     p.add_argument("--timeout", type=float, default=600.0)
+    p.add_argument("--stream-idle-timeout", type=positive_seconds, default=None,
+                   help="max seconds without upstream bytes in an SSE response (default: --timeout); "
+                        "closes stalled streams without replaying the POST")
     p.add_argument("--log", default="")
     p.add_argument("--identity-file", default="", help="local key for installer readiness verification")
     ARGS = p.parse_args()

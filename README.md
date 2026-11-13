@@ -290,6 +290,8 @@ What it *cannot* fix: a genuinely exhausted quota, an expired login, or a broken
 
 Normal JSON and compressed responses are passed through without SSE retries. Tool, reasoning, image and unknown output events commit the stream conservatively. Cancellation and the pre-output deadline interrupt blocked reads; Retry-After waits remain within the retry budget. A connection failure after sending a request has an uncertain outcome and is surfaced without automatically replaying that POST.
 
+For turns that appear to run silently for about 300 seconds without an explicit overload error ([#7](https://github.com/NewBeeM4n/codex-overload-fix/issues/7)), see [stalled-stream diagnostics](docs/stalled-streams.md). Manual launches can opt into `--stream-idle-timeout 60`; the default wait is unchanged. Shorter waits may interrupt legitimate silent reasoning. Stream-end logs distinguish idle timeout, EOF and transport failure and record whether a terminal SSE event was observed; ambiguous POSTs are never replayed.
+
 <br>
 
 ---
