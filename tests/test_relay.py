@@ -1,4 +1,5 @@
 """Isolated HTTP tests for retry, streaming, privacy and local identity."""
+import argparse
 import contextlib
 import hashlib
 import http.client
@@ -41,6 +42,9 @@ class MockUpstream(BaseHTTPRequestHandler):
         self.rfile.read(int(self.headers.get('Content-Length', 0)))
         type(self).calls += 1
         status, content_type, payload = type(self).queued.pop(0)
+        if callable(payload):
+            payload(self)
+            return
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Retry-After', type(self).retry_delay)
@@ -54,6 +58,12 @@ def event(value):
 
 
 class RelayStartupTests(unittest.TestCase):
+    def test_stream_idle_timeout_requires_positive_finite_seconds(self):
+        for value in ('0', '-1', 'nan', 'inf', '-inf'):
+            with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
+                relay.positive_seconds(value)
+        self.assertEqual(relay.positive_seconds('0.25'), 0.25)
+
     def test_startup_never_waits_for_reverse_dns(self):
         with mock.patch('socket.getfqdn', side_effect=AssertionError('unexpected reverse DNS')):
             server = relay.LocalRelayServer(('127.0.0.1', 0), relay.Handler)
@@ -103,6 +113,98 @@ class RelayTests(unittest.TestCase):
         relay.ARGS.max_attempts = 2
         status, _, body = self.request()
         self.assertEqual((status, body, MockUpstream.calls), (200, ok, 2))
+
+    def stalled_stream(self, head):
+        def send(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/event-stream')
+            handler.end_headers()
+            handler.wfile.write(head)
+            handler.wfile.flush()
+            handler.connection.settimeout(3)
+            # Wait until the relay closes; never call a real model.
+            with contextlib.suppress(OSError):
+                handler.connection.recv(1)
+        return send
+
+    def test_idle_setup_stream_returns_504_without_replaying(self):
+        relay.ARGS.stream_idle_timeout = 0.2
+        relay.ARGS.max_attempts = 3
+        for head in (b'', event({'type': 'response.created', 'response': {'output': []}})):
+            with self.subTest(head=head):
+                MockUpstream.calls = 0
+                MockUpstream.queued = [(200, 'text/event-stream', self.stalled_stream(head))]
+                output = io.StringIO()
+                started = time.monotonic()
+                with contextlib.redirect_stdout(output):
+                    status, _, body = self.request()
+                self.assertEqual(status, 504)
+                self.assertIn(b'not replayed', body)
+                self.assertEqual(MockUpstream.calls, 1)
+                self.assertLess(time.monotonic() - started, 1.5)
+                self.assertIn('upstream idle timeout', output.getvalue())
+
+    def test_idle_committed_stream_closes_without_replay_or_private_logs(self):
+        relay.ARGS.stream_idle_timeout = 0.2
+        relay.ARGS.max_attempts = 3
+        head = event({'type': 'response.reasoning_text.delta', 'delta': 'SYNTHETIC_PRIVATE_CONTENT'})
+        MockUpstream.queued = [(200, 'text/event-stream', self.stalled_stream(head))]
+        output = io.StringIO()
+        started = time.monotonic()
+        with contextlib.redirect_stdout(output):
+            status, _, body = self.request()
+        self.assertEqual((status, body, MockUpstream.calls), (200, head, 1))
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertIn('stream ended: upstream idle timeout; terminal=none', output.getvalue())
+        self.assertNotIn('SYNTHETIC_PRIVATE_CONTENT', output.getvalue())
+
+    def test_idle_timeout_resets_on_activity_instead_of_limiting_total_stream(self):
+        relay.ARGS.stream_idle_timeout = 0.3
+        head = event({'type': 'response.output_text.delta', 'delta': 'test'})
+        tail = event({'type': 'response.completed'})
+        def active(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/event-stream')
+            handler.end_headers()
+            for chunk in (head, head, head, head, tail):
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+                time.sleep(0.1)
+        MockUpstream.queued = [(200, 'text/event-stream', active)]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status, _, body = self.request()
+        self.assertEqual((status, body, MockUpstream.calls), (200, head * 4 + tail, 1))
+        self.assertIn('stream ended: eof; terminal=response.completed', output.getvalue())
+
+    def test_truncated_chunked_stream_is_logged_and_not_replayed(self):
+        head = event({'type': 'response.output_text.delta', 'delta': 'test'})
+        def truncated(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/event-stream')
+            handler.send_header('Transfer-Encoding', 'chunked')
+            handler.end_headers()
+            handler.wfile.write(('%x\r\n' % len(head)).encode() + head + b'\r\n4\r\nx')
+        relay.ARGS.max_attempts = 3
+        MockUpstream.queued = [(200, 'text/event-stream', truncated)]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status, _, body = self.request()
+        self.assertEqual((status, body, MockUpstream.calls), (200, head + b'x', 1))
+        self.assertIn('stream ended: transport interrupted; terminal=none', output.getvalue())
+
+    def test_stream_idle_override_does_not_change_json_passthrough(self):
+        relay.ARGS.stream_idle_timeout = 0.05
+        payload = b'{"output":[]}'
+        def slow_json(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/json')
+            handler.send_header('Content-Length', str(len(payload)))
+            handler.end_headers()
+            time.sleep(0.2)
+            handler.wfile.write(payload)
+        MockUpstream.queued = [(200, 'application/json', slow_json)]
+        self.assertEqual(self.request()[2], payload)
 
     def test_websocket_upgrade_declined_locally_for_http_fallback(self):
         conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)

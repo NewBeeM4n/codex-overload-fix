@@ -290,6 +290,8 @@ python3 relay/relay.py --port 8787 --log relay.log --max-attempts 30 --backoff-b
 
 正常 JSON 和压缩响应直接透传，不会误按 SSE 重试。工具、推理、图片和未知输出事件会保守地开始转发。取消和输出前的截止时间可以打断阻塞读取，Retry-After 等待受总重试预算约束。请求发出后若网络中断，上游是否已经执行并不确定，因此会返回错误，不会自动重发该 POST。
 
+若任务一直显示运行、约 300 秒后才恢复，且没有明确容量错误（[#7](https://github.com/NewBeeM4n/codex-overload-fix/issues/7)），请参阅[断流诊断与处理边界](docs/stalled-streams.md)。手动启动可按需添加 `--stream-idle-timeout 60`，默认等待时长不变；缩短等待也可能打断正常的静默推理。流结束日志会区分空闲超时、EOF 和传输中断，并标记是否收到 SSE 结束事件；状态不确定的 POST 不会被自动重发。
+
 <br>
 
 ---
