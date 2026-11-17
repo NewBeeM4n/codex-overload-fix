@@ -20,6 +20,23 @@
 
 <br>
 
+## Update · November 16, 2026: capacity errors may have been addressed
+
+[Tibo (@thsottiaux) posted on X](https://x.com/thsottiaux/status/2122206990101536852) that the Codex team **might have fixed the “model at capacity” errors**. The accompanying chart reports the share of daily active Codex users with at least one turn ending in a capacity error, falling from a peak of **6.82%** to **0.085%** by November 12. This is a user-level metric, not the failure rate of all requests.
+
+This is encouraging progress on the upstream issue. The wording remains tentative: it does not establish that every account or every stalled stream is fixed. The measurements below are historical observations from before this update, not a claim about today's failure rate. If you no longer see capacity errors with the official client, this relay may no longer be necessary; you can uninstall it using the instructions below. It remains an optional workaround for explicit overload refusals that still occur.
+
+<details>
+<summary>View the supplied screenshot of Tibo's post and chart</summary>
+
+<p align="center"><img src="assets/tibo-capacity-update-2026-11-16.jpg" width="540" alt="Screenshot of Tibo's November 16, 2026 post suggesting Codex capacity errors may have been fixed, with a chart of affected daily active users"></p>
+
+Source: Tibo's post linked above. The supplied screenshot displays an automatic Chinese translation; it is included as a reference, not an independent verification of the fix.
+
+</details>
+
+<br>
+
 ## In action
 
 | Before | After |
